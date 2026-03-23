@@ -1,8 +1,8 @@
 """Base class for workflow implementations.
 
-WorkflowImplementation provides the abstract base for defining workflows that
-can run on any backend (Celery, Lambda, Batch). Concrete implementations
-override the execute() method to perform their computation.
+WorkflowImplementation provides the base for defining workflows that can run
+on any backend (Celery, Lambda, Batch). Concrete implementations override
+the execute() method to perform their computation.
 
 This module is backend-agnostic and has no Django dependencies.
 """
@@ -12,6 +12,7 @@ from typing import Union
 import pydantic
 
 from .context import WorkflowContext
+from .outputs import get_outputs_schema
 
 
 class WorkflowImplementation:
@@ -19,11 +20,14 @@ class WorkflowImplementation:
 
     Subclasses should:
     1. Define a Parameters class for validated kwargs
-    2. Implement execute() method for the new context-based interface
+    2. Implement execute() method for the context-based interface
+    3. Optionally define an Outputs class to declare output files
 
     The Meta class provides workflow metadata:
     - name: Unique identifier (e.g., "topobank_statistics.height_distribution")
     - display_name: Human-readable name (e.g., "Height distribution")
+    - queue: Queue name for routing to execution backend (default: "default")
+    - dependencies: Dict mapping dependency keys to workflow names
 
     Note: execute() is not abstract to allow incremental migration from legacy
     implementations (topography_implementation, surface_implementation, etc.).
@@ -35,14 +39,27 @@ class WorkflowImplementation:
         class Meta:
             name = "myapp.my_workflow"
             display_name = "My Workflow"
+            queue = "prediction"  # Routes to prediction backend/queue
+            dependencies = {
+                "features": "myapp.feature_extraction",
+            }
 
         class Parameters(WorkflowImplementation.Parameters):
             threshold: float = 0.5
             iterations: int = 100
 
+        class Outputs:
+            files = {
+                "result.json": OutputFile(file_type="json", description="Results"),
+            }
+
         def execute(self, context: WorkflowContext) -> dict:
-            threshold = context.kwargs.get("threshold", 0.5)
-            iterations = context.kwargs.get("iterations", 100)
+            # Access parameters via self.kwargs
+            threshold = self.kwargs.threshold
+            iterations = self.kwargs.iterations
+
+            # Access dependencies
+            features = context.dependency("features").read_json("features.json")
 
             # Perform computation...
             result = {"accuracy": 0.95}
@@ -58,18 +75,22 @@ class WorkflowImplementation:
 
         name: str = ""
         display_name: str = ""
+        queue: str = "default"
+        dependencies: dict = {}
 
     class Parameters(pydantic.BaseModel):
         """Workflow parameters schema. Override in subclasses."""
 
         model_config = pydantic.ConfigDict(extra="forbid")
 
+    # Optional outputs declaration - subclasses can define an Outputs class
+    Outputs = None
+
     def __init__(self, **kwargs):
         """Initialize with validated parameters.
 
         Parameters are validated against the Parameters schema and stored
-        for access via self.kwargs. For the new execute() interface, kwargs
-        should be accessed via context.kwargs instead.
+        for access via self.kwargs.
         """
         self._kwargs = self.Parameters(**kwargs)
 
@@ -131,3 +152,14 @@ class WorkflowImplementation:
             else:
                 return {}
         return cls.Parameters(**kwargs).model_dump(exclude_unset=not fill_missing)
+
+    @classmethod
+    def get_outputs_schema(cls) -> list:
+        """Get JSON schema for declared outputs.
+
+        Returns
+        -------
+        list
+            List of file descriptors with their schemas.
+        """
+        return get_outputs_schema(getattr(cls, "Outputs", None))

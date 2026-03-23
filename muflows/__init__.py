@@ -59,6 +59,12 @@ from muflows.plan import (
 # Workflow base class
 from muflows.workflow import WorkflowImplementation
 
+# Output schema
+from muflows.outputs import OutputFile, get_outputs_schema
+
+# Registry
+from muflows import registry
+
 # Execution backends
 from muflows.backends import ExecutionBackend
 from muflows.backends.base import LocalBackend
@@ -81,6 +87,11 @@ __all__ = [
     "S3WorkflowContext",
     # Workflow
     "WorkflowImplementation",
+    # Outputs
+    "OutputFile",
+    "get_outputs_schema",
+    # Registry
+    "registry",
     # Plan
     "WorkflowNode",
     "WorkflowPlan",
