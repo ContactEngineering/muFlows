@@ -1,1 +1,1 @@
-"""Tests for muflows."""
+"""Tests for muflow."""

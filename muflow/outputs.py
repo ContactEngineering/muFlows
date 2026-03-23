@@ -6,7 +6,7 @@ class to specify output files with their types and optional schemas.
 
 Example
 -------
->>> from muflows import WorkflowImplementation, OutputFile
+>>> from muflow import WorkflowImplementation, OutputFile
 >>> import pydantic
 >>>
 >>> class ResultSchema(pydantic.BaseModel):

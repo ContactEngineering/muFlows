@@ -186,7 +186,7 @@ def compute_storage_prefix(
     function_name: str,
     subject_key: str,
     kwargs: dict,
-    base_prefix: str = "muflows",
+    base_prefix: str = "muflow",
 ) -> str:
     """Compute deterministic, content-addressed storage prefix.
 
@@ -205,12 +205,12 @@ def compute_storage_prefix(
     kwargs : dict
         Workflow parameters.
     base_prefix : str, optional
-        Base path prefix. Default is "muflows".
+        Base path prefix. Default is "muflow".
 
     Returns
     -------
     str
-        Storage prefix like "muflows/function-name/a1b2c3d4...".
+        Storage prefix like "muflow/function-name/a1b2c3d4...".
     """
     content = json.dumps(
         {

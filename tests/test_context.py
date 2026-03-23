@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from muflows import LocalFolderContext, WorkflowContext
+from muflow import LocalFolderContext, WorkflowContext
 
 
 class TestLocalFolderContext:

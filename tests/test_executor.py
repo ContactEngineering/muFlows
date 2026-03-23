@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from muflows import LocalFolderContext, WorkflowImplementation
-from muflows.executor import ExecutionPayload, ExecutionResult, execute_workflow
+from muflow import LocalFolderContext, WorkflowImplementation
+from muflow.executor import ExecutionPayload, ExecutionResult, execute_workflow
 
 
 class MockWorkflow(WorkflowImplementation):

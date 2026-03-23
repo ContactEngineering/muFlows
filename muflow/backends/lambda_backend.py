@@ -38,7 +38,7 @@ class LambdaBackend:
         if boto3 is None:
             raise ImportError(
                 "boto3 is required for LambdaBackend. "
-                "Install with: pip install muflows[s3]"
+                "Install with: pip install muflow[s3]"
             )
 
         self._function_name = function_name
@@ -145,7 +145,7 @@ def create_lambda_handler(workflow_registry: dict):
     ...     "sds_ml.v3.gpc.training": GPCWorkflow,
     ... })
     """
-    from muflows.context import S3WorkflowContext
+    from muflow.context import S3WorkflowContext
 
     def handler(event, context):
         """Lambda handler for workflow execution.

@@ -8,12 +8,12 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from muflows.io.json import (
+from muflow.io.json import (
     ExtendedJSONEncoder,
     dumps_json,
     loads_json,
 )
-from muflows.io.xarray import (
+from muflow.io.xarray import (
     load_xarray_from_bytes,
     load_xarray_from_file,
     save_xarray_to_bytes,

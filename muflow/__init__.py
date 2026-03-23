@@ -1,6 +1,6 @@
-"""muflows - Backend-agnostic workflow execution engine.
+"""muflow - Backend-agnostic workflow execution engine.
 
-muflows provides abstractions for defining and executing workflows that can
+muflow provides abstractions for defining and executing workflows that can
 run on multiple backends (Celery, AWS Lambda, AWS Batch) without modification.
 
 Core Concepts
@@ -21,7 +21,7 @@ ExecutionBackend
 
 Example
 -------
->>> from muflows import LocalFolderContext
+>>> from muflow import LocalFolderContext
 >>> import xarray as xr
 >>>
 >>> # Create a context for testing
@@ -42,14 +42,14 @@ Example
 __version__ = "0.1.0"
 
 # Core context abstractions
-from muflows.context import (
+from muflow.context import (
     WorkflowContext,
     LocalFolderContext,
     S3WorkflowContext,
 )
 
 # Plan data structures
-from muflows.plan import (
+from muflow.plan import (
     WorkflowNode,
     WorkflowPlan,
     compute_storage_prefix,
@@ -57,27 +57,27 @@ from muflows.plan import (
 )
 
 # Workflow base class
-from muflows.workflow import WorkflowImplementation
+from muflow.workflow import WorkflowImplementation
 
 # Output schema
-from muflows.outputs import OutputFile, get_outputs_schema
+from muflow.outputs import OutputFile, get_outputs_schema
 
 # Registry
-from muflows import registry
+from muflow import registry
 
 # Executor
-from muflows.executor import (
+from muflow.executor import (
     ExecutionPayload,
     ExecutionResult,
     execute_workflow,
 )
 
 # Execution backends
-from muflows.backends import ExecutionBackend
-from muflows.backends.base import LocalBackend
+from muflow.backends import ExecutionBackend
+from muflow.backends.base import LocalBackend
 
 # I/O utilities
-from muflows.io import (
+from muflow.io import (
     ExtendedJSONEncoder,
     dumps_json,
     loads_json,
@@ -121,7 +121,7 @@ __all__ = [
 
 # Optional: LambdaBackend (requires boto3)
 try:
-    from muflows.backends import LambdaBackend
+    from muflow.backends import LambdaBackend
     __all__.append("LambdaBackend")
 except ImportError:
     pass

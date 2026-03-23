@@ -1,4 +1,4 @@
-"""xarray I/O utilities for muflows."""
+"""xarray I/O utilities for muflow."""
 
 import io
 import tempfile

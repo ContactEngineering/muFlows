@@ -18,7 +18,7 @@ import traceback
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from muflows.context import WorkflowContext
+from muflow.context import WorkflowContext
 
 
 @dataclass

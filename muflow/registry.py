@@ -5,8 +5,8 @@ Workflows are registered by their Meta.name attribute.
 
 Example
 -------
->>> from muflows import WorkflowImplementation
->>> from muflows.registry import register, get, get_all
+>>> from muflow import WorkflowImplementation
+>>> from muflow.registry import register, get, get_all
 >>>
 >>> @register
 ... class MyWorkflow(WorkflowImplementation):

@@ -4,7 +4,7 @@ from typing import Union
 
 import pytest
 
-from muflows import LocalFolderContext, WorkflowContext, WorkflowImplementation
+from muflow import LocalFolderContext, WorkflowContext, WorkflowImplementation
 
 
 class SimpleWorkflow(WorkflowImplementation):

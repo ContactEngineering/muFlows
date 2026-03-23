@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from muflows import (
+from muflow import (
     WorkflowNode,
     WorkflowPlan,
     compute_node_key,

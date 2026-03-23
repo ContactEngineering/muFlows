@@ -20,8 +20,8 @@ from typing import IO, Any, Protocol, Union, runtime_checkable
 
 import xarray as xr
 
-from muflows.io.json import dumps_json, loads_json
-from muflows.io.xarray import (
+from muflow.io.json import dumps_json, loads_json
+from muflow.io.xarray import (
     load_xarray_from_bytes,
     load_xarray_from_file,
     save_xarray_to_bytes,
@@ -286,7 +286,7 @@ class S3WorkflowContext:
             except ImportError:
                 raise ImportError(
                     "boto3 is required for S3WorkflowContext. "
-                    "Install with: pip install muflows[s3]"
+                    "Install with: pip install muflow[s3]"
                 )
         else:
             self._s3 = s3_client
