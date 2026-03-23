@@ -56,6 +56,9 @@ from muflows.plan import (
     compute_node_key,
 )
 
+# Workflow base class
+from muflows.workflow import WorkflowImplementation
+
 # Execution backends
 from muflows.backends import ExecutionBackend
 from muflows.backends.base import LocalBackend
@@ -76,6 +79,8 @@ __all__ = [
     "WorkflowContext",
     "LocalFolderContext",
     "S3WorkflowContext",
+    # Workflow
+    "WorkflowImplementation",
     # Plan
     "WorkflowNode",
     "WorkflowPlan",
