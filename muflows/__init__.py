@@ -65,6 +65,13 @@ from muflows.outputs import OutputFile, get_outputs_schema
 # Registry
 from muflows import registry
 
+# Executor
+from muflows.executor import (
+    ExecutionPayload,
+    ExecutionResult,
+    execute_workflow,
+)
+
 # Execution backends
 from muflows.backends import ExecutionBackend
 from muflows.backends.base import LocalBackend
@@ -92,6 +99,10 @@ __all__ = [
     "get_outputs_schema",
     # Registry
     "registry",
+    # Executor
+    "ExecutionPayload",
+    "ExecutionResult",
+    "execute_workflow",
     # Plan
     "WorkflowNode",
     "WorkflowPlan",
