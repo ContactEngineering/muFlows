@@ -22,14 +22,18 @@ pip install muflows[dev]
 
 ### WorkflowContext
 
-Abstract interface for file I/O that workflow implementations use. This allows the same workflow code to run on different backends:
+Abstract interface (Protocol) for file I/O that workflow implementations use. The context is passed to `WorkflowImplementation.execute(context)` and provides storage, dependency access, and progress reporting. This allows the same workflow code to run on different backends without modification.
 
-- `LocalFolderContext` - Local filesystem (for testing)
-- `S3WorkflowContext` - Direct S3 access (for Lambda/Batch)
-- `DjangoWorkflowContext` - Django ORM integration (in topobank, not here)
+The `context/` package is split into separate modules:
+
+- `context/base.py` — `WorkflowContext` protocol definition (the abstract interface)
+- `context/local.py` — `LocalFolderContext` (local filesystem, for testing and local execution)
+- `context/s3.py` — `S3WorkflowContext` (direct S3 access, for Lambda/Batch)
+
+Domain-specific contexts (e.g. `DjangoWorkflowContext` in topobank, `TopographyContext` in sds-workflows) extend `LocalFolderContext` or implement the protocol directly, adding domain properties like `topography` or `topography_name`.
 
 ```python
-from muflows import LocalFolderContext
+from muflow import LocalFolderContext
 import xarray as xr
 
 # Create a context
