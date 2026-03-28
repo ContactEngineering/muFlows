@@ -96,14 +96,15 @@ class ExecutionResult(pydantic.BaseModel):
 def execute_workflow(
     payload: ExecutionPayload,
     context: WorkflowContext,
-    get_implementation: Callable[[str], type],
+    get_entry: Callable,
 ) -> ExecutionResult:
     """Execute a workflow.  Pure function with no database access.
 
     This is the core execution function used by all backends.  It:
-    1. Looks up the workflow implementation by name
-    2. Instantiates it with the provided kwargs
-    3. Calls ``execute(context)``
+    1. Looks up the ``WorkflowEntry`` by name
+    2. Validates kwargs against the entry's ``parameters`` model (if any)
+       and stores the result on ``context._parameters``
+    3. Calls ``entry.fn(context)``
     4. Writes ``manifest.json`` via the storage backend (always, even on error)
     5. Returns success/failure result with the list of files written
 
@@ -113,23 +114,39 @@ def execute_workflow(
         Workflow name, kwargs, and storage configuration.
     context : WorkflowContext
         Execution context wrapping a storage backend.
-    get_implementation : Callable[[str], type]
-        Function that returns the implementation class for a workflow name.
+    get_entry : Callable[[str], WorkflowEntry]
+        Function that returns a ``WorkflowEntry`` for a workflow name.
+        Typically ``lambda name: registry.get_all()[name]``.
 
     Returns
     -------
     ExecutionResult
         Success status, any error information, and list of files written.
     """
-    try:
-        # Get the implementation class
-        impl_class = get_implementation(payload.workflow_name)
+    from muflow.registry import WorkflowEntry
 
-        # Instantiate with kwargs
-        impl = impl_class(**payload.kwargs)
+    try:
+        # Look up the workflow entry
+        entry = get_entry(payload.workflow_name)
+
+        # If get_entry returned a class (legacy caller), wrap it
+        if not isinstance(entry, WorkflowEntry):
+            klass = entry
+            def _legacy_fn(ctx):
+                impl = klass(**payload.kwargs)
+                return impl.execute(ctx)
+            entry = WorkflowEntry(
+                name=payload.workflow_name, fn=_legacy_fn
+            )
+
+        # Validate parameters and attach to context
+        if entry.parameters is not None:
+            context._parameters = entry.parameters(**payload.kwargs)
+        else:
+            context._parameters = None
 
         # Execute the workflow
-        impl.execute(context)
+        entry.fn(context)
 
         return ExecutionResult(
             success=True,

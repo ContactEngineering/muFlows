@@ -55,7 +55,6 @@ class CeleryBackend:
     ...     workflow_name="sds_ml.v3.gpr.training",
     ...     kwargs={"threshold": 0.5},
     ...     storage_prefix="muflow/gpr/abc123",
-    ...     allowed_outputs={"result.json", "model.nc"},
     ... )
     >>> task_id = backend.submit(analysis_id=123, payload=payload)
     """
@@ -265,14 +264,13 @@ def create_celery_task(
             kwargs=payload.kwargs,
             dependency_prefixes=payload.dependency_prefixes,
             bucket=bucket,
-            allowed_outputs=payload.allowed_outputs,
         )
 
         # Execute using the pure execution function
         result = execute_workflow(
             payload=payload,
             context=ctx,
-            get_implementation=lambda name: workflow_registry[name],
+            get_entry=lambda name: workflow_registry[name],
         )
 
         # Write execution result to S3 for verification/debugging

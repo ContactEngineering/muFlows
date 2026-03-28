@@ -43,7 +43,6 @@ class ExecutionBackend(Protocol):
             - kwargs: workflow parameters
             - storage_prefix: where to write outputs
             - dependency_prefixes: dict of dependency key -> prefix
-            - allowed_outputs: set of filenames workflow can write
 
         Returns
         -------

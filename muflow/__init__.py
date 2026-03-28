@@ -71,6 +71,7 @@ from muflow.outputs import OutputFile, get_outputs_schema
 
 # Registry
 from muflow import registry
+from muflow.registry import WorkflowEntry, register_workflow
 
 # Executor
 from muflow.executor import (
@@ -116,6 +117,8 @@ __all__ = [
     "get_outputs_schema",
     # Registry
     "registry",
+    "WorkflowEntry",
+    "register_workflow",
     # Executor
     "ExecutionPayload",
     "ExecutionResult",

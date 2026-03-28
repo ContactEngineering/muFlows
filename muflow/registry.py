@@ -1,33 +1,85 @@
-"""Basic workflow registry.
+"""Workflow registry.
 
-This module provides a simple registry for workflow implementations.
-Workflows are registered by their Meta.name attribute.
+Workflows can be registered as plain functions (preferred) or as
+``WorkflowImplementation`` subclasses (legacy).  Both are stored as
+``WorkflowEntry`` objects.
 
-Example
--------
+Function-based registration
+---------------------------
+>>> from muflow.registry import register_workflow
+>>> import pydantic
+>>>
+>>> class MyParams(pydantic.BaseModel):
+...     threshold: float = 0.5
+>>>
+>>> @register_workflow(
+...     name="myapp.my_workflow",
+...     display_name="My Workflow",
+...     parameters=MyParams,
+... )
+... def my_workflow(context):
+...     return {"result": "done"}
+
+Class-based registration (legacy)
+---------------------------------
 >>> from muflow import WorkflowImplementation
->>> from muflow.registry import register, get, get_all
+>>> from muflow.registry import register
 >>>
 >>> @register
 ... class MyWorkflow(WorkflowImplementation):
 ...     class Meta:
 ...         name = "myapp.my_workflow"
 ...         display_name = "My Workflow"
-...
 ...     def execute(self, context):
 ...         return {"result": "done"}
->>>
->>> # Retrieve by name
->>> workflow_class = get("myapp.my_workflow")
->>> workflow = workflow_class()
 """
 
-from typing import Dict, Optional, Type
+from __future__ import annotations
 
-# Registry storage
-_implementations_by_name: Dict[str, Type] = {}
-_implementations_by_display_name: Dict[str, Type] = {}
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, Optional, Type
 
+import pydantic
+
+
+# ── WorkflowEntry ──────────────────────────────────────────────────────────
+
+@dataclass
+class WorkflowEntry:
+    """Unified descriptor for a registered workflow.
+
+    Attributes
+    ----------
+    name : str
+        Unique identifier (e.g. ``"topobank_statistics.autocorrelation"``).
+    fn : Callable
+        The workflow function.  Signature: ``fn(context) -> dict | None``.
+    display_name : str
+        Human-readable name shown in UIs.
+    queue : str
+        Queue name for backend routing.
+    dependencies : dict
+        Maps dependency key to workflow name.
+    parameters : type[pydantic.BaseModel] | None
+        Pydantic model for parameter validation.  ``None`` means no
+        parameters.
+    """
+
+    name: str
+    fn: Callable
+    display_name: str = ""
+    queue: str = "default"
+    dependencies: dict = field(default_factory=dict)
+    parameters: Optional[Type[pydantic.BaseModel]] = None
+
+
+# ── Registry storage ───────────────────────────────────────────────────────
+
+_entries_by_name: Dict[str, WorkflowEntry] = {}
+_entries_by_display_name: Dict[str, WorkflowEntry] = {}
+
+
+# ── Exceptions ─────────────────────────────────────────────────────────────
 
 class RegistryError(Exception):
     """Base exception for registry errors."""
@@ -49,95 +101,155 @@ class NotRegisteredException(RegistryError):
         super().__init__(f"No workflow registered with name '{name}'.")
 
 
+# ── Function-based registration (preferred) ────────────────────────────────
+
+def register_workflow(
+    name: str,
+    *,
+    display_name: str = "",
+    queue: str = "default",
+    dependencies: dict = None,
+    parameters: Optional[Type[pydantic.BaseModel]] = None,
+) -> Callable:
+    """Decorator that registers a function as a workflow.
+
+    Example
+    -------
+    >>> @register_workflow(
+    ...     name="myapp.analyse",
+    ...     display_name="Analyse",
+    ...     parameters=MyParams,
+    ... )
+    ... def analyse(context):
+    ...     ...
+    """
+    def decorator(fn: Callable) -> Callable:
+        entry = WorkflowEntry(
+            name=name,
+            fn=fn,
+            display_name=display_name,
+            queue=queue,
+            dependencies=dependencies or {},
+            parameters=parameters,
+        )
+        _register_entry(entry)
+        return fn
+    return decorator
+
+
+# ── Class-based registration (legacy) ──────────────────────────────────────
+
 def register(klass: Type) -> Type:
-    """Register a workflow implementation class.
+    """Register a ``WorkflowImplementation`` subclass.
 
-    Can be used as a decorator:
-
-        @register
-        class MyWorkflow(WorkflowImplementation):
-            ...
-
-    Or called directly:
-
-        register(MyWorkflow)
+    Can be used as a decorator or called directly.  Internally wraps the
+    class in a ``WorkflowEntry``.
 
     Parameters
     ----------
     klass : Type
-        The workflow implementation class to register.
+        A ``WorkflowImplementation`` subclass with a ``Meta.name`` attribute.
 
     Returns
     -------
     Type
-        The registered class (allows use as decorator).
-
-    Raises
-    ------
-    AlreadyRegisteredException
-        If a workflow with the same name is already registered.
-    ValueError
-        If the class has no Meta.name attribute.
+        The registered class (unchanged).
     """
-    name = getattr(klass.Meta, "name", None)
-    if not name:
+    meta_name = getattr(getattr(klass, "Meta", None), "name", None)
+    if not meta_name:
         raise ValueError(
             f"Workflow class {klass.__name__} has no Meta.name attribute."
         )
 
-    if name in _implementations_by_name:
-        raise AlreadyRegisteredException(name)
+    meta = klass.Meta
+    display_name = getattr(meta, "display_name", "")
+    queue = getattr(meta, "queue", "default")
+    dependencies = getattr(meta, "dependencies", {})
+    parameters_cls = getattr(klass, "Parameters", None)
+    # Only keep Parameters if it's a subclass that adds fields
+    if parameters_cls is not None:
+        try:
+            if not parameters_cls.model_fields:
+                parameters_cls = None
+        except AttributeError:
+            parameters_cls = None
 
-    _implementations_by_name[name] = klass
+    def _class_wrapper(context):
+        """Wrapper that instantiates the class and calls execute()."""
+        if context.parameters is not None:
+            impl = klass(**context.parameters.model_dump())
+        else:
+            impl = klass()
+        return impl.execute(context)
 
-    display_name = getattr(klass.Meta, "display_name", None)
-    if display_name:
-        _implementations_by_display_name[display_name] = klass
-
+    entry = WorkflowEntry(
+        name=meta_name,
+        fn=_class_wrapper,
+        display_name=display_name,
+        queue=queue,
+        dependencies=dependencies,
+        parameters=parameters_cls,
+    )
+    # Store the original class on the entry for backward compatibility
+    entry._class = klass  # noqa: SLF001
+    _register_entry(entry)
     return klass
 
 
-def get(name: str) -> Optional[Type]:
+# ── Internal helpers ───────────────────────────────────────────────────────
+
+def _register_entry(entry: WorkflowEntry) -> None:
+    """Store a WorkflowEntry in the registry."""
+    if entry.name in _entries_by_name:
+        raise AlreadyRegisteredException(entry.name)
+    _entries_by_name[entry.name] = entry
+    if entry.display_name:
+        _entries_by_display_name[entry.display_name] = entry
+
+
+# ── Lookup ─────────────────────────────────────────────────────────────────
+
+def get(name: str) -> Optional[WorkflowEntry]:
     """Get a registered workflow by name.
 
     Parameters
     ----------
     name : str
-        The workflow name (Meta.name).
+        The workflow name.
 
     Returns
     -------
-    Type or None
-        The workflow class, or None if not found.
+    WorkflowEntry or None
+        The workflow entry, or None if not found.
     """
-    return _implementations_by_name.get(name)
+    return _entries_by_name.get(name)
 
 
-def get_by_display_name(display_name: str) -> Optional[Type]:
+def get_by_display_name(display_name: str) -> Optional[WorkflowEntry]:
     """Get a registered workflow by display name.
 
     Parameters
     ----------
     display_name : str
-        The workflow display name (Meta.display_name).
+        The workflow display name.
 
     Returns
     -------
-    Type or None
-        The workflow class, or None if not found.
+    WorkflowEntry or None
+        The workflow entry, or None if not found.
     """
-    return _implementations_by_display_name.get(display_name)
+    return _entries_by_display_name.get(display_name)
 
 
-def get_all() -> Dict[str, Type]:
+def get_all() -> Dict[str, WorkflowEntry]:
     """Get all registered workflows.
 
     Returns
     -------
     dict
-        Dictionary mapping workflow names to classes.
+        Dictionary mapping workflow names to ``WorkflowEntry`` objects.
     """
-    return dict(_implementations_by_name)
+    return dict(_entries_by_name)
 
 
 def get_names() -> list:
@@ -148,36 +260,26 @@ def get_names() -> list:
     list
         List of workflow names.
     """
-    return list(_implementations_by_name.keys())
+    return list(_entries_by_name.keys())
 
 
 def clear() -> None:
-    """Clear all registered workflows.
-
-    Primarily for testing.
-    """
-    _implementations_by_name.clear()
-    _implementations_by_display_name.clear()
+    """Clear all registered workflows.  Primarily for testing."""
+    _entries_by_name.clear()
+    _entries_by_display_name.clear()
 
 
 def unregister(name: str) -> None:
     """Unregister a workflow by name.
-
-    Parameters
-    ----------
-    name : str
-        The workflow name to unregister.
 
     Raises
     ------
     NotRegisteredException
         If no workflow with this name is registered.
     """
-    if name not in _implementations_by_name:
+    if name not in _entries_by_name:
         raise NotRegisteredException(name)
 
-    klass = _implementations_by_name.pop(name)
-
-    display_name = getattr(klass.Meta, "display_name", None)
-    if display_name and display_name in _implementations_by_display_name:
-        del _implementations_by_display_name[display_name]
+    entry = _entries_by_name.pop(name)
+    if entry.display_name and entry.display_name in _entries_by_display_name:
+        del _entries_by_display_name[entry.display_name]
