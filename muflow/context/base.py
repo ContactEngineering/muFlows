@@ -1,10 +1,14 @@
 """Workflow context protocol.
 
-The WorkflowContext protocol defines the interface that workflow functions
-receive.  It provides file I/O (delegated to a storage backend), dependency
-access, progress reporting, and validated parameters.
+The WorkflowContext protocol defines the base interface that workflow
+functions receive.  It provides file I/O (delegated to a storage backend),
+dependency access, and progress reporting.
 
-The protocol is deliberately domain-agnostic.  Domain-specific contexts
+The protocol is deliberately agnostic of workflow parameters.  Contexts
+that carry parameters use the ``ParameterizedMixin`` from
+``muflow.context.parameterized``.
+
+The protocol is also domain-agnostic.  Domain-specific contexts
 (e.g. TopographyContext, SurfaceContext) are defined downstream in
 sds-workflows, not here.
 """
@@ -23,9 +27,12 @@ class WorkflowContext(Protocol):
     """Abstract interface for workflow execution contexts.
 
     A context wraps a ``StorageBackend`` and adds workflow-level concerns:
-    validated parameters, dependency access, and progress reporting.
-    Implementations delegate file I/O to the storage backend, which enforces
-    path traversal protection, write-once semantics, and protected files.
+    dependency access and progress reporting.  Implementations delegate
+    file I/O to the storage backend, which enforces path traversal
+    protection, write-once semantics, and protected files.
+
+    Workflow parameters (``kwargs`` / ``parameters``) are NOT part of this
+    protocol.  Use ``ParameterizedMixin`` if your context needs them.
     """
 
     @property
@@ -36,20 +43,6 @@ class WorkflowContext(Protocol):
     @property
     def storage_prefix(self) -> str:
         """Root path or S3 prefix for this workflow's output files."""
-        ...
-
-    @property
-    def kwargs(self) -> dict:
-        """Raw parameters dict passed to this workflow."""
-        ...
-
-    @property
-    def parameters(self) -> Any:
-        """Validated parameters (pydantic model), or None.
-
-        Set by the executor after parameter validation.  Workflow functions
-        should prefer ``context.parameters.my_param`` over ``context.kwargs``.
-        """
         ...
 
     # ── File I/O (delegated to storage backend) ─────────────────────────

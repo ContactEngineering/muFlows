@@ -189,39 +189,25 @@ def compute_storage_prefix(
 ) -> str:
     """Compute deterministic, content-addressed storage prefix.
 
-    The prefix is a SHA-256 hash of the workflow identity (function name,
-    subject, and parameters). This ensures:
-    - Same inputs always produce the same prefix (caching)
-    - Different inputs never collide
-    - No dependency on database-assigned IDs
-
-    Parameters
-    ----------
-    function_name : str
-        Name of the workflow function.
-    subject_key : str
-        Unique identifier for the subject.
-    kwargs : dict
-        Workflow parameters.
-    base_prefix : str, optional
-        Base path prefix. Default is "muflow".
-
-    Returns
-    -------
-    str
-        Storage prefix like "muflow/function-name/a1b2c3d4...".
+    .. deprecated::
+        Use ``muflow.storage.compute_prefix`` instead.
     """
-    content = json.dumps(
-        {
-            "function": function_name,
-            "subject": subject_key,
-            "kwargs": kwargs,
-        },
-        sort_keys=True,
+    import warnings
+
+    warnings.warn(
+        "compute_storage_prefix is deprecated. "
+        "Use muflow.storage.compute_prefix instead.",
+        DeprecationWarning,
+        stacklevel=2,
     )
-    h = hashlib.sha256(content.encode()).hexdigest()
-    # Use first 16 chars of hash (64 bits) - sufficient for uniqueness
-    return f"{base_prefix}/{function_name}/{h[:16]}"
+    from muflow.storage.base import compute_prefix
+
+    hash_dict = {
+        "workflow": function_name,
+        "subject": subject_key,
+        **kwargs,
+    }
+    return compute_prefix(hash_dict, base_prefix=base_prefix)
 
 
 def compute_node_key(
@@ -231,27 +217,24 @@ def compute_node_key(
 ) -> str:
     """Compute a unique key for a workflow node.
 
-    Parameters
-    ----------
-    function_name : str
-        Name of the workflow function.
-    subject_key : str
-        Unique identifier for the subject.
-    kwargs : dict
-        Workflow parameters.
-
-    Returns
-    -------
-    str
-        Human-readable key like "sds_ml.v3.gpr.training/tag:123/a1b2c3d4".
+    .. deprecated::
+        Use ``muflow.storage.compute_prefix`` instead.
     """
-    content = json.dumps(
-        {
-            "function": function_name,
-            "subject": subject_key,
-            "kwargs": kwargs,
-        },
-        sort_keys=True,
+    import warnings
+
+    warnings.warn(
+        "compute_node_key is deprecated. "
+        "Use muflow.storage.compute_prefix instead.",
+        DeprecationWarning,
+        stacklevel=2,
     )
-    h = hashlib.sha256(content.encode()).hexdigest()[:8]
-    return f"{function_name}/{subject_key}/{h}"
+    from muflow.storage.base import compute_prefix
+
+    hash_dict = {
+        "workflow": function_name,
+        "subject": subject_key,
+        **kwargs,
+    }
+    prefix = compute_prefix(hash_dict)
+    # Return just the hash portion as a short key
+    return f"{function_name}/{subject_key}/{prefix.rsplit('/', 1)[-1][:8]}"

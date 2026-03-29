@@ -7,15 +7,15 @@ from typing import IO, Any, Union
 
 import xarray as xr
 
+from muflow.context.parameterized import ParameterizedMixin
 from muflow.storage import LocalStorageBackend
 
 
-class LocalFolderContext:
+class LocalFolderContext(ParameterizedMixin):
     """WorkflowContext backed by local filesystem.
 
-    Delegates all file I/O to a ``LocalStorageBackend``.  The storage backend
-    provides path traversal protection, write-once semantics, protected file
-    enforcement, and manifest generation.
+    Delegates all file I/O to a ``LocalStorageBackend``.  Inherits
+    ``kwargs`` and ``parameters`` from ``ParameterizedMixin``.
 
     Parameters
     ----------
@@ -52,48 +52,30 @@ class LocalFolderContext:
         """Return the local path as a string."""
         return self._storage.storage_prefix
 
-    @property
-    def kwargs(self) -> dict:
-        """Return workflow parameters."""
-        return self._kwargs
-
-    @property
-    def parameters(self):
-        """Return validated parameters (pydantic model), or None."""
-        return self._parameters
-
     # ── File I/O (delegated to storage backend) ─────────────────────────
 
     def save_file(self, filename: str, data: bytes) -> None:
-        """Save raw bytes to a file."""
         self._storage.save_file(filename, data)
 
     def save_json(self, filename: str, data: Any) -> None:
-        """Save data as JSON."""
         self._storage.save_json(filename, data)
 
     def save_xarray(self, filename: str, dataset: xr.Dataset) -> None:
-        """Save an xarray Dataset as NetCDF."""
         self._storage.save_xarray(filename, dataset)
 
     def open_file(self, filename: str, mode: str = "r") -> IO:
-        """Open a file for reading."""
         return self._storage.open_file(filename, mode)
 
     def read_file(self, filename: str) -> bytes:
-        """Read raw bytes from a file."""
         return self._storage.read_file(filename)
 
     def read_json(self, filename: str) -> Any:
-        """Read and parse a JSON file."""
         return self._storage.read_json(filename)
 
     def read_xarray(self, filename: str) -> xr.Dataset:
-        """Read a NetCDF file as xarray Dataset."""
         return self._storage.read_xarray(filename)
 
     def exists(self, filename: str) -> bool:
-        """Check if a file exists."""
         return self._storage.exists(filename)
 
     # ── Dependency access ───────────────────────────────────────────────

@@ -10,7 +10,7 @@ import xarray as xr
 
 from muflow.io.json import dumps_json, loads_json
 from muflow.io.xarray import load_xarray_from_file, save_xarray_to_file
-from muflow.storage.base import validate_filename, validate_writable
+from muflow.storage.base import compute_prefix, validate_filename, validate_writable
 
 
 class LocalStorageBackend:
@@ -20,10 +20,26 @@ class LocalStorageBackend:
     ----------
     path : str or Path
         Root directory for file storage.  Created if it does not exist.
+    hash_dict : dict, optional
+        When provided together with *path*, the actual storage directory
+        becomes ``path / compute_prefix(hash_dict)``.  This enables
+        content-addressed storage where the directory name is derived
+        from the computation identity.
+    base_prefix : str
+        Base prefix passed to ``compute_prefix``.  Only used when
+        *hash_dict* is provided.
     """
 
-    def __init__(self, path: Union[str, Path]):
-        self._path = Path(path)
+    def __init__(
+        self,
+        path: Union[str, Path],
+        hash_dict: dict = None,
+        base_prefix: str = "muflow",
+    ):
+        if hash_dict is not None:
+            self._path = Path(path) / compute_prefix(hash_dict, base_prefix)
+        else:
+            self._path = Path(path)
         self._path.mkdir(parents=True, exist_ok=True)
         self._written_files: set[str] = set()
 
@@ -85,6 +101,12 @@ class LocalStorageBackend:
     def exists(self, filename: str) -> bool:
         validate_filename(filename)
         return self._full_path(filename).exists()
+
+    # ── Caching ─────────────────────────────────────────────────────────
+
+    def is_cached(self) -> bool:
+        """Check if results already exist (``manifest.json`` present)."""
+        return self._full_path("manifest.json").exists()
 
     # ── Manifest ────────────────────────────────────────────────────────
 

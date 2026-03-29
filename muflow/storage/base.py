@@ -15,6 +15,8 @@ subject-loading behaviour.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 from datetime import datetime, timezone
 from typing import IO, Any, Protocol, runtime_checkable
@@ -91,6 +93,33 @@ def validate_writable(filename: str, written_files: set[str]) -> None:
         )
 
 
+# ── Content-addressed prefix computation ────────────────────────────────────
+
+def compute_prefix(hash_dict: dict, base_prefix: str = "muflow") -> str:
+    """Compute a content-addressed storage prefix from a dictionary.
+
+    The dictionary is serialised as sorted JSON and hashed with SHA-256.
+    The ``workflow`` key (if present) is used as a human-readable path
+    component.
+
+    Parameters
+    ----------
+    hash_dict : dict
+        Dictionary of fields that uniquely identify a computation.
+    base_prefix : str
+        Base path prefix.  Default is ``"muflow"``.
+
+    Returns
+    -------
+    str
+        Storage prefix like ``"muflow/my.workflow/a1b2c3d4e5f6g7h8"``.
+    """
+    content = json.dumps(hash_dict, sort_keys=True)
+    h = hashlib.sha256(content.encode()).hexdigest()[:16]
+    label = hash_dict.get("workflow", "unknown")
+    return f"{base_prefix}/{label}/{h}"
+
+
 # ── Protocol ────────────────────────────────────────────────────────────────
 
 @runtime_checkable
@@ -146,6 +175,12 @@ class StorageBackend(Protocol):
 
     def exists(self, filename: str) -> bool:
         """Check if a file exists."""
+        ...
+
+    # ── Caching ──────────────────────────────────────────────────────────
+
+    def is_cached(self) -> bool:
+        """Check if results already exist (``manifest.json`` present)."""
         ...
 
     # ── Manifest ────────────────────────────────────────────────────────

@@ -17,6 +17,7 @@ s3
 from muflow.storage.base import (
     PROTECTED_FILES,
     StorageBackend,
+    compute_prefix,
     validate_filename,
     validate_writable,
 )
@@ -28,6 +29,7 @@ __all__ = [
     "StorageBackend",
     "LocalStorageBackend",
     "S3StorageBackend",
+    "compute_prefix",
     "validate_filename",
     "validate_writable",
 ]

@@ -46,11 +46,13 @@ from muflow.storage import (
     StorageBackend,
     LocalStorageBackend,
     S3StorageBackend,
+    compute_prefix,
 )
 
 # Core context abstractions
 from muflow.context import (
     WorkflowContext,
+    ParameterizedMixin,
     LocalFolderContext,
     S3WorkflowContext,
 )
@@ -106,8 +108,10 @@ __all__ = [
     "StorageBackend",
     "LocalStorageBackend",
     "S3StorageBackend",
+    "compute_prefix",
     # Context
     "WorkflowContext",
+    "ParameterizedMixin",
     "LocalFolderContext",
     "S3WorkflowContext",
     # Workflow

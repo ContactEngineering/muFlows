@@ -10,7 +10,7 @@ import xarray as xr
 
 from muflow.io.json import dumps_json, loads_json
 from muflow.io.xarray import load_xarray_from_bytes, save_xarray_to_bytes
-from muflow.storage.base import validate_filename, validate_writable
+from muflow.storage.base import compute_prefix, validate_filename, validate_writable
 
 
 class S3StorageBackend:
@@ -24,10 +24,26 @@ class S3StorageBackend:
         S3 bucket name.
     s3_client : optional
         Boto3 S3 client.  If not provided, one will be created.
+    hash_dict : dict, optional
+        When provided, *storage_prefix* is computed from the hash dict
+        instead of using the explicit *storage_prefix* argument.
+    base_prefix : str
+        Base prefix passed to ``compute_prefix``.  Only used when
+        *hash_dict* is provided.
     """
 
-    def __init__(self, storage_prefix: str, bucket: str, s3_client=None):
-        self._prefix = storage_prefix
+    def __init__(
+        self,
+        storage_prefix: str = "",
+        bucket: str = "",
+        s3_client=None,
+        hash_dict: dict = None,
+        base_prefix: str = "muflow",
+    ):
+        if hash_dict is not None:
+            self._prefix = compute_prefix(hash_dict, base_prefix)
+        else:
+            self._prefix = storage_prefix
         self._bucket = bucket
         self._written_files: set[str] = set()
 
@@ -118,6 +134,12 @@ class S3StorageBackend:
             if e.response["Error"]["Code"] == "404":
                 return False
             raise
+
+    # ── Caching ─────────────────────────────────────────────────────────
+
+    def is_cached(self) -> bool:
+        """Check if results already exist (``manifest.json`` present)."""
+        return self.exists("manifest.json")
 
     # ── Manifest ────────────────────────────────────────────────────────
 
