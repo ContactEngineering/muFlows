@@ -313,7 +313,7 @@ class CeleryBackend:
 
 def create_celery_task(
     celery_app,
-    workflow_registry: dict,
+    workflow_registry: Optional[dict] = None,
     task_name: str = "muflow.execute_node",
 ):
     """Create a Celery task for executing workflow nodes.
@@ -326,8 +326,9 @@ def create_celery_task(
     ----------
     celery_app
         Celery application instance.
-    workflow_registry : dict
+    workflow_registry : dict, optional
         Mapping from workflow name to WorkflowEntry (or legacy class).
+        Defaults to `muflow.registry.get_all()`.
     task_name : str
         Name for the Celery task. Defaults to "muflow.execute_node".
 
@@ -341,12 +342,17 @@ def create_celery_task(
     >>> from celery import Celery
     >>> from muflow import registry
     >>>
+    >>> # In your Celery worker:
     >>> app = Celery("worker")
-    >>> task = create_celery_task(app, registry.get_all())
+    >>> task = create_celery_task(app)
     """
+    from muflow import registry
     from muflow.context import WorkflowContext
     from muflow.executor import ExecutionPayload, execute_workflow
     from muflow.storage import S3StorageBackend
+
+    if workflow_registry is None:
+        workflow_registry = registry.get_all()
 
     @celery_app.task(name=task_name, bind=True)
     def execute_node_task(

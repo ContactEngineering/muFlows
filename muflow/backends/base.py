@@ -100,9 +100,9 @@ class LocalBackend:
     ----------
     base_path : str
         Base directory for workflow storage.
-    registry_get : callable
+    registry_get : callable, optional
         Function to get workflow entries: (name) -> WorkflowEntry
-        Typically `muflow.registry.get`.
+        Defaults to `muflow.registry.get`.
 
     Example
     -------
@@ -114,23 +114,26 @@ class LocalBackend:
     >>> plan = planner.build_plan("my_workflow", "subject:1", kwargs)
     >>>
     >>> # Execute locally
-    >>> backend = LocalBackend("/tmp/output", registry.get)
+    >>> backend = LocalBackend("/tmp/output")
     >>> plan_id = backend.submit_plan(plan)
     >>> print(f"Completed: {plan_id}")
     """
 
-    def __init__(self, base_path: str, registry_get: Callable):
+    def __init__(self, base_path: str, registry_get: Optional[Callable] = None):
         """Initialize the local backend.
 
         Parameters
         ----------
         base_path : str
             Base directory for workflow storage.
-        registry_get : callable
+        registry_get : callable, optional
             Function to get workflow entries by name.
+            Defaults to `muflow.registry.get`.
         """
+        from muflow import registry
+
         self.base_path = base_path
-        self.registry_get = registry_get
+        self.registry_get = registry_get or registry.get
         self._plan_states: dict[str, str] = {}
 
     def submit_plan(

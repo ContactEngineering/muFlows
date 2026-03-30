@@ -193,13 +193,14 @@ class LambdaBackend:
         )
 
 
-def create_lambda_handler(workflow_registry: dict):
+def create_lambda_handler(workflow_registry: Optional[dict] = None):
     """Create a Lambda handler function for workflow node execution.
 
     Parameters
     ----------
-    workflow_registry : dict
+    workflow_registry : dict, optional
         Mapping from workflow name to WorkflowEntry.
+        Defaults to `muflow.registry.get_all()`.
 
     Returns
     -------
@@ -212,11 +213,15 @@ def create_lambda_handler(workflow_registry: dict):
     >>> from muflow.backends.aws_lambda import create_lambda_handler
     >>>
     >>> # In your Lambda function module:
-    >>> handler = create_lambda_handler(registry.get_all())
+    >>> handler = create_lambda_handler()
     """
+    from muflow import registry
     from muflow.context import WorkflowContext
     from muflow.executor import ExecutionPayload, execute_workflow
     from muflow.storage import S3StorageBackend
+
+    if workflow_registry is None:
+        workflow_registry = registry.get_all()
 
     def handler(event, context):
         """Lambda handler for workflow node execution.
