@@ -1,32 +1,47 @@
-"""Database-agnostic Celery execution backend.
+"""Celery execution backend with parallel DAG orchestration.
 
-This module provides a CeleryBackend that executes workflows without database
-access, paralleling the LambdaBackend. Workers receive serialized ExecutionPayload
-and use WorkflowContext with S3StorageBackend for all I/O.
+This module provides a CeleryBackend that executes workflow plans using
+Celery's chord and group primitives for parallel execution.
 
-This enables:
-- Same workflow code running on Celery, Lambda, or local without modification
-- Horizontal scaling of Celery workers without Django/database dependencies
-- Moving execution from Django-coupled Celery to database-agnostic Celery
+Architecture
+------------
+- submit_plan() converts the WorkflowPlan DAG into Celery chord/group structures
+- Nodes at the same "level" (same dependency depth) run in parallel via group()
+- Levels are chained together via chord() so each level waits for the previous
+- Workers execute individual nodes via execute_workflow()
+
+Example DAG
+-----------
+    feature_0 ─┐
+    feature_1 ─┼─► training
+    feature_2 ─┘
+               └─► loo_fold_0
+               └─► loo_fold_1
+
+Becomes:
+    chord(
+        group(feature_0, feature_1, feature_2),  # Level 0: parallel
+        group(training, loo_0, loo_1),           # Level 1: parallel, after level 0
+    )
 """
 
 from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Callable, Optional
 
-from muflow.executor import ExecutionPayload, ExecutionResult
+if TYPE_CHECKING:
+    from muflow.plan import WorkflowNode, WorkflowPlan
 
 _log = logging.getLogger(__name__)
 
 
 class CeleryBackend:
-    """Database-agnostic Celery backend for muFlow.
+    """Celery backend with parallel DAG orchestration.
 
-    Unlike Django's CeleryBackend which only passes analysis_id and looks up
-    data from the database, this backend passes the full ExecutionPayload.
-    Workers execute without database access using WorkflowContext with S3StorageBackend.
+    Converts WorkflowPlan into Celery chord/group structures for efficient
+    parallel execution. Nodes at the same dependency level run in parallel.
 
     Parameters
     ----------
@@ -34,147 +49,287 @@ class CeleryBackend:
         Celery application instance.
     bucket : str
         S3 bucket for workflow I/O.
-    default_queue : str
-        Default Celery queue name. Defaults to "default".
     task_name : str
-        Name of the Celery task to invoke. Defaults to "muflow.execute_workflow_task".
+        Name of the Celery task for node execution.
+        Defaults to "muflow.execute_node".
 
     Example
     -------
     >>> from celery import Celery
-    >>> from muflow import ExecutionPayload
+    >>> from muflow import WorkflowPlanner
+    >>> from muflow.backends import CeleryBackend
     >>>
     >>> app = Celery("myapp")
-    >>> backend = CeleryBackend(
-    ...     celery_app=app,
-    ...     bucket="my-bucket",
-    ...     default_queue="workflows",
-    ... )
+    >>> backend = CeleryBackend(app, bucket="my-bucket")
     >>>
-    >>> payload = ExecutionPayload(
-    ...     workflow_name="sds_ml.v3.gpr.training",
-    ...     kwargs={"threshold": 0.5},
-    ...     storage_prefix="muflow/gpr/abc123",
-    ... )
-    >>> task_id = backend.submit(analysis_id=123, payload=payload)
+    >>> plan = WorkflowPlanner().build_plan(...)
+    >>> plan_id = backend.submit_plan(plan)
     """
 
     def __init__(
         self,
         celery_app,
         bucket: str,
-        default_queue: str = "default",
-        task_name: str = "muflow.execute_workflow_task",
+        task_name: str = "muflow.execute_node",
     ):
         self._app = celery_app
         self._bucket = bucket
-        self._default_queue = default_queue
         self._task_name = task_name
+        self._plan_results: dict[str, object] = {}  # plan_id -> AsyncResult
 
-    def submit(self, analysis_id: int, payload: ExecutionPayload) -> str:
-        """Submit workflow for Celery execution.
+    def submit_plan(
+        self,
+        plan: "WorkflowPlan",
+        on_node_complete: Optional[Callable[[str], None]] = None,
+        on_node_failure: Optional[Callable[[str, str], None]] = None,
+    ) -> str:
+        """Submit a workflow plan for parallel execution.
 
-        The full ExecutionPayload is serialized and passed to the worker.
-        No database lookup is performed by the worker.
+        Converts the DAG into Celery chord/group structures:
+        - Nodes with no dependencies (level 0) run first in parallel
+        - Nodes at level N run after all level N-1 nodes complete
+        - Within each level, nodes run in parallel
 
         Parameters
         ----------
-        analysis_id : int
-            ID to associate with this execution. Used for callbacks
-            and tracking, but not for database lookups.
-        payload : ExecutionPayload
-            Complete workflow execution payload.
+        plan : WorkflowPlan
+            Complete workflow plan.
+        on_node_complete : callable, optional
+            Not directly supported - use Celery signals or callbacks task.
+        on_node_failure : callable, optional
+            Not directly supported - use Celery signals or callbacks task.
 
         Returns
         -------
         str
-            Celery task ID.
+            Celery task ID for the outermost chord/group.
         """
-        queue = payload.queue or self._default_queue
+        # Compute execution levels (topological sort by depth)
+        levels = self._compute_levels(plan)
 
-        task = self._app.send_task(
-            self._task_name,
-            args=[analysis_id, payload.to_dict(), self._bucket],
-            queue=queue,
+        _log.info(
+            f"Submitting plan {plan.root_key[:16]}... with {len(plan.nodes)} nodes "
+            f"in {len(levels)} levels"
         )
 
-        _log.debug(
-            f"Submitted task {task.id} for analysis {analysis_id} "
-            f"to queue {queue} (workflow: {payload.workflow_name})"
-        )
-        return task.id
+        # Build Celery workflow from levels
+        celery_workflow = self._build_celery_workflow(levels, plan)
 
-    def cancel(self, task_id: str) -> None:
-        """Cancel a running task.
+        if celery_workflow is None:
+            # All nodes are cached - nothing to execute
+            _log.info(f"Plan {plan.root_key[:16]}... - all nodes cached")
+            return f"cached-{plan.root_key}"
+
+        # Submit the workflow
+        result = celery_workflow.apply_async()
+        self._plan_results[result.id] = result
+
+        _log.info(f"Submitted plan as Celery task {result.id}")
+        return result.id
+
+    def get_plan_state(self, plan_id: str) -> str:
+        """Get the state of a plan execution.
 
         Parameters
         ----------
-        task_id : str
-            Celery task ID to cancel.
-        """
-        self._app.control.revoke(task_id, terminate=True)
-        _log.debug(f"Cancelled task {task_id}")
-
-    def get_state(self, task_id: str) -> str:
-        """Get the state of a task.
-
-        Parameters
-        ----------
-        task_id : str
-            Celery task ID.
+        plan_id : str
+            Plan execution ID (Celery task ID).
 
         Returns
         -------
         str
-            Task state. Maps Celery states to muflow states:
-            - PENDING -> "pending"
-            - STARTED -> "running"
-            - SUCCESS -> "success"
-            - FAILURE -> "failure"
-            - REVOKED -> "cancelled"
+            One of: "pending", "running", "success", "failure"
         """
-        from celery.result import AsyncResult
+        if plan_id.startswith("cached-"):
+            return "success"
 
-        result = AsyncResult(task_id, app=self._app)
-        state = result.state
+        result = self._plan_results.get(plan_id)
+        if result is None:
+            # Try to get from Celery
+            from celery.result import AsyncResult
+            result = AsyncResult(plan_id, app=self._app)
 
-        # Map Celery states to muflow states
         state_map = {
             "PENDING": "pending",
             "STARTED": "running",
             "SUCCESS": "success",
             "FAILURE": "failure",
-            "REVOKED": "cancelled",
-            "RETRY": "pending",
+            "REVOKED": "failure",
         }
-        return state_map.get(state, "pending")
+        return state_map.get(result.state, "pending")
+
+    def cancel_plan(self, plan_id: str) -> None:
+        """Cancel a running plan.
+
+        Note: This revokes the top-level task. Individual node tasks
+        that are already running may continue.
+
+        Parameters
+        ----------
+        plan_id : str
+            Plan execution ID (Celery task ID).
+        """
+        if plan_id.startswith("cached-"):
+            return  # Nothing to cancel
+
+        self._app.control.revoke(plan_id, terminate=True)
+        _log.info(f"Cancelled plan {plan_id}")
+
+    def _compute_levels(self, plan: "WorkflowPlan") -> list[list["WorkflowNode"]]:
+        """Group nodes by execution level (topological sort).
+
+        Level 0: nodes with no dependencies (leaf nodes)
+        Level N: nodes whose dependencies are all in levels < N
+
+        Parameters
+        ----------
+        plan : WorkflowPlan
+            The workflow plan.
+
+        Returns
+        -------
+        list[list[WorkflowNode]]
+            Nodes grouped by execution level.
+        """
+        levels: list[list["WorkflowNode"]] = []
+        remaining = set(plan.nodes.keys())
+        completed = {k for k, n in plan.nodes.items() if n.cached}
+
+        while remaining - completed:
+            # Find nodes whose deps are all complete
+            ready = []
+            for key in remaining - completed:
+                node = plan.nodes[key]
+                deps_satisfied = all(
+                    d in completed for d in node.depends_on
+                )
+                if deps_satisfied:
+                    ready.append(node)
+
+            if not ready:
+                # Check for circular dependency
+                raise ValueError(
+                    f"Circular dependency detected. Remaining nodes: "
+                    f"{remaining - completed}"
+                )
+
+            levels.append(ready)
+            completed.update(n.key for n in ready)
+
+        return levels
+
+    def _build_celery_workflow(
+        self,
+        levels: list[list["WorkflowNode"]],
+        plan: "WorkflowPlan",
+    ):
+        """Convert execution levels into Celery chord/chain structure.
+
+        Parameters
+        ----------
+        levels : list[list[WorkflowNode]]
+            Nodes grouped by execution level.
+        plan : WorkflowPlan
+            The workflow plan (for dependency prefixes).
+
+        Returns
+        -------
+        celery.canvas.Signature or None
+            Celery workflow signature, or None if all nodes are cached.
+        """
+        from celery import chord, group
+
+        # Build groups for each level (excluding cached nodes)
+        celery_groups = []
+        for level in levels:
+            tasks = []
+            for node in level:
+                if node.cached:
+                    continue
+                task = self._make_node_task(node, plan)
+                tasks.append(task)
+
+            if tasks:
+                celery_groups.append(group(tasks))
+
+        if not celery_groups:
+            return None
+
+        if len(celery_groups) == 1:
+            return celery_groups[0]
+
+        # Chain levels together using chord
+        # chord(group_a, group_b) means: run group_a, when ALL complete, run group_b
+        # For multiple levels: chord(g0, chord(g1, chord(g2, g3)))
+        # Or simpler: chain them with a dummy aggregator
+
+        # Build from the end backwards
+        result = celery_groups[-1]
+        for grp in reversed(celery_groups[:-1]):
+            # chord(grp, result) - grp runs first, then result
+            result = chord(grp, result)
+
+        return result
+
+    def _make_node_task(self, node: "WorkflowNode", plan: "WorkflowPlan"):
+        """Create a Celery task signature for a node.
+
+        Parameters
+        ----------
+        node : WorkflowNode
+            The node to create a task for.
+        plan : WorkflowPlan
+            The workflow plan (for dependency prefixes).
+
+        Returns
+        -------
+        celery.canvas.Signature
+            Celery task signature.
+        """
+        # Build dependency prefixes
+        dependency_prefixes = {
+            dep_key: plan.nodes[dep_key].storage_prefix
+            for dep_key in node.depends_on
+        }
+
+        # Build payload dict
+        payload_dict = {
+            "workflow_name": node.function,
+            "kwargs": node.kwargs,
+            "storage_prefix": node.storage_prefix,
+            "dependency_prefixes": dependency_prefixes,
+        }
+
+        # Get queue from node or use default
+        queue = getattr(node, 'queue', None) or "default"
+
+        # Create task signature
+        return self._app.signature(
+            self._task_name,
+            args=[node.key, payload_dict, self._bucket],
+            queue=queue,
+        )
 
 
 def create_celery_task(
     celery_app,
     workflow_registry: dict,
-    on_complete: Optional[Callable[[int, ExecutionResult], None]] = None,
-    task_name: str = "muflow.execute_workflow_task",
+    task_name: str = "muflow.execute_node",
 ):
-    """Create a Celery task for database-agnostic workflow execution.
+    """Create a Celery task for executing workflow nodes.
 
     This is a factory function that creates a Celery task configured
     with a registry of available workflow implementations. The task
-    uses WorkflowContext with S3StorageBackend for all I/O, with no database access.
-
-    Similar to create_lambda_handler() but for Celery workers.
+    is called by CeleryBackend for each node in the plan.
 
     Parameters
     ----------
     celery_app
         Celery application instance.
     workflow_registry : dict
-        Mapping from workflow name to implementation class.
-    on_complete : callable, optional
-        Function called with (analysis_id, ExecutionResult) after execution.
-        This is typically used to trigger a completion callback.
+        Mapping from workflow name to WorkflowEntry (or legacy class).
     task_name : str
-        Name for the Celery task. Defaults to "muflow.execute_workflow_task".
+        Name for the Celery task. Defaults to "muflow.execute_node".
 
     Returns
     -------
@@ -184,54 +339,32 @@ def create_celery_task(
     Example
     -------
     >>> from celery import Celery
-    >>> from myworkflows import GPRWorkflow, GPCWorkflow
-    >>>
-    >>> app = Celery("myapp")
-    >>> task = create_celery_task(
-    ...     celery_app=app,
-    ...     workflow_registry={
-    ...         "sds_ml.v3.gpr.training": GPRWorkflow,
-    ...         "sds_ml.v3.gpc.training": GPCWorkflow,
-    ...     },
-    ... )
-
-    Worker Configuration
-    --------------------
-    In the worker's startup module, register the task before starting:
-
-    >>> from celery import Celery
-    >>> from muflow.backends.celery_backend import create_celery_task
-    >>> from myworkflows import workflow_registry
+    >>> from muflow import registry
     >>>
     >>> app = Celery("worker")
-    >>> app.config_from_object("myconfig")
-    >>>
-    >>> # Register the task
-    >>> create_celery_task(app, workflow_registry)
-    >>>
-    >>> # Now workers can receive muflow.execute_workflow_task
+    >>> task = create_celery_task(app, registry.get_all())
     """
     from muflow.context import WorkflowContext
-    from muflow.executor import execute_workflow
+    from muflow.executor import ExecutionPayload, execute_workflow
     from muflow.storage import S3StorageBackend
 
     @celery_app.task(name=task_name, bind=True)
-    def execute_workflow_task(
+    def execute_node_task(
         self,
-        analysis_id: int,
+        node_key: str,
         payload_dict: dict,
         bucket: str,
     ):
-        """Execute a workflow without database access.
+        """Execute a single workflow node.
 
         Parameters
         ----------
         self : celery.Task
             Bound Celery task instance.
-        analysis_id : int
-            ID for tracking and callbacks (not used for DB lookup).
+        node_key : str
+            Unique key for this node (for logging/tracking).
         payload_dict : dict
-            Serialized ExecutionPayload.
+            Serialized execution payload.
         bucket : str
             S3 bucket for I/O.
 
@@ -240,23 +373,16 @@ def create_celery_task(
         dict
             Execution result summary.
         """
-        # Reconstruct payload from serialized dict
         payload = ExecutionPayload.from_dict(payload_dict)
 
         _log.info(
-            f"execute_workflow_task: Starting {payload.workflow_name} "
-            f"(analysis_id={analysis_id}, task_id={self.request.id})"
+            f"execute_node_task: Starting {payload.workflow_name} "
+            f"(node_key={node_key[:16]}..., task_id={self.request.id})"
         )
 
         if payload.workflow_name not in workflow_registry:
             error_msg = f"Unknown workflow: {payload.workflow_name}"
-            _log.error(f"execute_workflow_task: {error_msg}")
-            result = ExecutionResult(
-                success=False,
-                error_message=error_msg,
-            )
-            if on_complete:
-                on_complete(analysis_id, result)
+            _log.error(f"execute_node_task: {error_msg}")
             raise ValueError(error_msg)
 
         # Create storage backends
@@ -272,17 +398,17 @@ def create_celery_task(
             dependency_storages=dep_storages,
         )
 
-        # Execute using the pure execution function
+        # Execute
         result = execute_workflow(
             payload=payload,
             context=ctx,
             get_entry=lambda name: workflow_registry[name],
         )
 
-        # Write execution result to S3 for verification/debugging
+        # Write execution metadata to S3
         try:
             ctx.save_json("_execution_result.json", {
-                "analysis_id": analysis_id,
+                "node_key": node_key,
                 "task_id": self.request.id,
                 "success": result.success,
                 "error_message": result.error_message,
@@ -292,30 +418,22 @@ def create_celery_task(
         except Exception as e:
             _log.warning(f"Failed to write _execution_result.json: {e}")
 
-        # Trigger completion callback
-        if on_complete:
-            try:
-                on_complete(analysis_id, result)
-            except Exception as e:
-                _log.exception(f"Completion callback failed: {e}")
-
         if result.success:
             _log.info(
-                f"execute_workflow_task: Completed {payload.workflow_name} "
-                f"(analysis_id={analysis_id})"
+                f"execute_node_task: Completed {payload.workflow_name} "
+                f"(node_key={node_key[:16]}...)"
             )
         else:
             _log.error(
-                f"execute_workflow_task: Failed {payload.workflow_name} "
-                f"(analysis_id={analysis_id}): {result.error_message}"
+                f"execute_node_task: Failed {payload.workflow_name} "
+                f"(node_key={node_key[:16]}...): {result.error_message}"
             )
-            # Re-raise to mark task as failed in Celery
             raise RuntimeError(result.error_message)
 
         return {
-            "analysis_id": analysis_id,
+            "node_key": node_key,
             "success": result.success,
             "files_written": result.files_written,
         }
 
-    return execute_workflow_task
+    return execute_node_task

@@ -1,12 +1,22 @@
-"""AWS Lambda execution backend."""
+"""AWS Lambda execution backend.
+
+This module provides LambdaBackend for executing workflow plans on AWS Lambda.
+
+For simple plans, nodes are invoked serially. For complex parallel execution,
+consider using AWS Step Functions to orchestrate Lambda invocations (not yet
+implemented in this backend).
+"""
 
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Optional
+import logging
+from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
-    from muflow.executor import ExecutionPayload
+    from muflow.plan import WorkflowPlan
+
+_log = logging.getLogger(__name__)
 
 try:
     import boto3
@@ -15,21 +25,32 @@ except ImportError:
 
 
 class LambdaBackend:
-    """Execute workflows on AWS Lambda.
+    """Execute workflow plans on AWS Lambda.
 
-    Lambda functions run without Django/database access. They receive
-    all necessary information in the event payload and write outputs
-    directly to S3. Completion is signaled via Lambda Destinations
-    (to SQS) or Step Functions.
+    For now, this backend invokes Lambda functions serially for each node.
+    For true parallel execution, use AWS Step Functions to orchestrate
+    the Lambda invocations.
 
     Parameters
     ----------
     function_name : str
-        Default Lambda function name to invoke.
+        Lambda function name to invoke for each node.
     bucket : str
         S3 bucket for workflow data.
     lambda_client : optional
         Boto3 Lambda client. If not provided, one will be created.
+
+    Example
+    -------
+    >>> from muflow import WorkflowPlanner
+    >>> from muflow.backends import LambdaBackend
+    >>>
+    >>> backend = LambdaBackend(
+    ...     function_name="my-workflow-executor",
+    ...     bucket="my-bucket",
+    ... )
+    >>> plan = WorkflowPlanner().build_plan(...)
+    >>> plan_id = backend.submit_plan(plan)
     """
 
     def __init__(
@@ -47,77 +68,183 @@ class LambdaBackend:
         self._function_name = function_name
         self._bucket = bucket
         self._lambda = lambda_client or boto3.client("lambda")
+        self._plan_states: dict[str, str] = {}
 
-    def submit(self, analysis_id: int, payload: "ExecutionPayload") -> str:
-        """Invoke Lambda function asynchronously.
+    def submit_plan(
+        self,
+        plan: "WorkflowPlan",
+        on_node_complete: Optional[Callable[[str], None]] = None,
+        on_node_failure: Optional[Callable[[str, str], None]] = None,
+    ) -> str:
+        """Submit a workflow plan for execution.
+
+        Currently executes nodes serially by invoking Lambda synchronously
+        for each node in dependency order. For async parallel execution,
+        consider using Step Functions.
 
         Parameters
         ----------
-        analysis_id : int
-            Database ID of the WorkflowResult.
-        payload : ExecutionPayload
-            Workflow execution payload.
+        plan : WorkflowPlan
+            Complete workflow plan.
+        on_node_complete : callable, optional
+            Callback when a node completes.
+        on_node_failure : callable, optional
+            Callback when a node fails.
 
         Returns
         -------
         str
-            AWS Request ID for the invocation.
+            Plan execution ID.
         """
-        event = {
-            "analysis_id": analysis_id,
-            "workflow_name": payload.workflow_name,
-            "kwargs": payload.kwargs,
-            "storage_prefix": payload.storage_prefix,
-            "dependency_prefixes": payload.dependency_prefixes,
-            "bucket": self._bucket,
-        }
+        plan_id = f"lambda-{plan.root_key[:16]}"
+        self._plan_states[plan_id] = "running"
 
-        response = self._lambda.invoke(
-            FunctionName=self._function_name,
-            InvocationType="Event",  # Async
-            Payload=json.dumps(event),
+        # Initialize completed set with cached nodes
+        completed = {k for k, n in plan.nodes.items() if n.cached}
+
+        _log.info(
+            f"Executing plan {plan_id} with {len(plan.nodes)} nodes "
+            f"({len(completed)} cached)"
         )
 
-        return response["ResponseMetadata"]["RequestId"]
+        try:
+            while not plan.is_complete(completed):
+                ready = plan.ready_nodes(completed)
 
-    def cancel(self, task_id: str) -> None:
-        """Cancel not supported for Lambda."""
+                if not ready:
+                    raise RuntimeError(
+                        "Deadlock: no nodes ready but plan not complete."
+                    )
+
+                for node in ready:
+                    _log.debug(f"Invoking Lambda for node: {node.function}")
+
+                    # Build dependency prefixes
+                    dependency_prefixes = {
+                        dep_key: plan.nodes[dep_key].storage_prefix
+                        for dep_key in node.depends_on
+                    }
+
+                    # Build event payload
+                    event = {
+                        "node_key": node.key,
+                        "workflow_name": node.function,
+                        "kwargs": node.kwargs,
+                        "storage_prefix": node.storage_prefix,
+                        "dependency_prefixes": dependency_prefixes,
+                        "bucket": self._bucket,
+                    }
+
+                    # Invoke synchronously
+                    response = self._lambda.invoke(
+                        FunctionName=self._function_name,
+                        InvocationType="RequestResponse",  # Sync
+                        Payload=json.dumps(event),
+                    )
+
+                    # Check for errors
+                    if "FunctionError" in response:
+                        payload = json.loads(response["Payload"].read())
+                        error_msg = payload.get("errorMessage", "Unknown error")
+                        self._plan_states[plan_id] = "failure"
+                        if on_node_failure:
+                            on_node_failure(node.key, error_msg)
+                        raise RuntimeError(f"Lambda failed: {error_msg}")
+
+                    completed.add(node.key)
+                    _log.debug(f"Node completed: {node.key[:16]}...")
+                    if on_node_complete:
+                        on_node_complete(node.key)
+
+            self._plan_states[plan_id] = "success"
+            _log.info(f"Plan {plan_id} completed successfully")
+            return plan_id
+
+        except Exception:
+            self._plan_states[plan_id] = "failure"
+            raise
+
+    def get_plan_state(self, plan_id: str) -> str:
+        """Get the state of a plan execution.
+
+        Parameters
+        ----------
+        plan_id : str
+            Plan execution ID.
+
+        Returns
+        -------
+        str
+            One of: "pending", "running", "success", "failure"
+        """
+        return self._plan_states.get(plan_id, "pending")
+
+    def cancel_plan(self, plan_id: str) -> None:
+        """Cancel not supported for Lambda (sync execution).
+
+        Raises
+        ------
+        NotImplementedError
+            Always, since Lambda invocations are synchronous.
+        """
         raise NotImplementedError(
-            "Lambda invocations cannot be cancelled. "
-            "Consider using Step Functions for cancellation support."
+            "LambdaBackend executes synchronously and cannot be cancelled. "
+            "Consider using Step Functions for cancellable async execution."
         )
-
-    def get_state(self, task_id: str) -> str:
-        """State tracking not supported for async Lambda.
-
-        Returns
-        -------
-        str
-            Always returns "pending" since we can't query Lambda state.
-        """
-        return "pending"
 
 
 def create_lambda_handler(workflow_registry: dict):
-    """Create a Lambda handler function for workflow execution.
+    """Create a Lambda handler function for workflow node execution.
 
     Parameters
     ----------
     workflow_registry : dict
-        Mapping from workflow name to ``WorkflowEntry`` (or legacy class).
+        Mapping from workflow name to WorkflowEntry.
 
     Returns
     -------
     callable
         Lambda handler function.
+
+    Example
+    -------
+    >>> from muflow import registry
+    >>> from muflow.backends.aws_lambda import create_lambda_handler
+    >>>
+    >>> # In your Lambda function module:
+    >>> handler = create_lambda_handler(registry.get_all())
     """
     from muflow.context import WorkflowContext
     from muflow.executor import ExecutionPayload, execute_workflow
     from muflow.storage import S3StorageBackend
 
     def handler(event, context):
-        """Lambda handler for workflow execution."""
+        """Lambda handler for workflow node execution.
+
+        Parameters
+        ----------
+        event : dict
+            Event containing:
+            - node_key: str
+            - workflow_name: str
+            - kwargs: dict
+            - storage_prefix: str
+            - dependency_prefixes: dict
+            - bucket: str
+        context : LambdaContext
+            Lambda context (unused).
+
+        Returns
+        -------
+        dict
+            Execution result.
+        """
         workflow_name = event["workflow_name"]
+        node_key = event["node_key"]
+        bucket = event["bucket"]
+
+        _log.info(f"Lambda handler: Starting {workflow_name} "
+                  f"(node_key={node_key[:16]}...)")
 
         if workflow_name not in workflow_registry:
             raise ValueError(f"Unknown workflow: {workflow_name}")
@@ -128,8 +255,6 @@ def create_lambda_handler(workflow_registry: dict):
             storage_prefix=event["storage_prefix"],
             dependency_prefixes=event.get("dependency_prefixes", {}),
         )
-
-        bucket = event["bucket"]
 
         # Create storage backends
         storage = S3StorageBackend(payload.storage_prefix, bucket)
@@ -155,7 +280,7 @@ def create_lambda_handler(workflow_registry: dict):
 
         return {
             "status": "success",
-            "analysis_id": event["analysis_id"],
+            "node_key": node_key,
             "files_written": result.files_written,
         }
 

@@ -47,58 +47,50 @@ Example
 
 __version__ = "0.1.0"
 
-# Storage backends
-from muflow.storage import (
-    StorageBackend,
-    LocalStorageBackend,
-    S3StorageBackend,
-    compute_prefix,
-)
+# Registry
+from muflow import registry
+
+# Execution backends
+from muflow.backends import ExecutionBackend, LocalBackend
 
 # Core context
-from muflow.context import (
-    WorkflowContext,
-    create_local_context,
-)
+from muflow.context import WorkflowContext, create_local_context
+
+# Dependencies
+from muflow.dependencies import WorkflowSpec
+
+# Executor
+from muflow.executor import ExecutionPayload, ExecutionResult, execute_workflow
+
+# Output schema
+from muflow.outputs import OutputFile, get_outputs_schema
 
 # Plan data structures
 from muflow.plan import (
     WorkflowNode,
     WorkflowPlan,
-    compute_storage_prefix,
     compute_node_key,
+    compute_storage_prefix,
 )
 
 # Planner
 from muflow.planner import WorkflowPlanner, get_dependency_access_map
+from muflow.registry import WorkflowEntry, register_workflow
 
-# Dependencies
-from muflow.dependencies import WorkflowSpec
+# Storage backends
+from muflow.storage import (
+    LocalStorageBackend,
+    S3StorageBackend,
+    StorageBackend,
+    compute_prefix,
+)
 
 # Workflow base class
 from muflow.workflow import WorkflowImplementation
 
-# Output schema
-from muflow.outputs import OutputFile, get_outputs_schema
-
-# Registry
-from muflow import registry
-from muflow.registry import WorkflowEntry, register_workflow
-
-# Executor
-from muflow.executor import (
-    ExecutionPayload,
-    ExecutionResult,
-    execute_workflow,
-)
-
-# Execution backends
-from muflow.backends import ExecutionBackend
-from muflow.backends.base import LocalBackend
-
 # Lambda backend factory (requires boto3)
 try:
-    from muflow.backends.lambda_backend import create_lambda_handler
+    from muflow.backends.lambda_backend import create_lambda_handler  # noqa: F401
 except ImportError:
     pass
 
@@ -106,8 +98,8 @@ except ImportError:
 from muflow.io import (
     ExtendedJSONEncoder,
     dumps_json,
-    loads_json,
     load_xarray_from_bytes,
+    loads_json,
     save_xarray_to_bytes,
 )
 
@@ -158,17 +150,17 @@ __all__ = [
 
 # Optional: LambdaBackend (requires boto3)
 try:
-    from muflow.backends import LambdaBackend
+    from muflow.backends import LambdaBackend  # noqa: F401
     __all__.extend(["LambdaBackend", "create_lambda_handler"])
 except ImportError:
     pass
 
 # Optional: CeleryBackend (requires celery)
 try:
-    from muflow.backends import CeleryBackend, create_celery_task
-    from muflow.backends.callbacks import (
-        CompletionCallback,
+    from muflow.backends import CeleryBackend, create_celery_task  # noqa: F401
+    from muflow.backends.callbacks import (  # noqa: F401
         CeleryCompletionCallback,
+        CompletionCallback,
         NoOpCompletionCallback,
     )
     __all__.extend([
