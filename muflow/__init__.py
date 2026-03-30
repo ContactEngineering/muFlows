@@ -16,7 +16,10 @@ StorageBackend
 
 WorkflowPlan
     A static DAG representing the complete execution plan. Built once upfront
-    by the WorkflowPlanner (in topobank) and stored as JSON.
+    by the WorkflowPlanner and stored as JSON.
+
+WorkflowPlanner
+    Builds execution DAGs from workflow dependency declarations.
 
 ExecutionBackend
     Interface for dispatching workflow nodes to different compute backends.
@@ -65,6 +68,12 @@ from muflow.plan import (
     compute_storage_prefix,
     compute_node_key,
 )
+
+# Planner
+from muflow.planner import WorkflowPlanner, get_dependency_access_map
+
+# Dependencies
+from muflow.dependencies import WorkflowSpec
 
 # Workflow base class
 from muflow.workflow import WorkflowImplementation
@@ -131,6 +140,11 @@ __all__ = [
     "WorkflowPlan",
     "compute_storage_prefix",
     "compute_node_key",
+    # Planner
+    "WorkflowPlanner",
+    "get_dependency_access_map",
+    # Dependencies
+    "WorkflowSpec",
     # Backends
     "ExecutionBackend",
     "LocalBackend",

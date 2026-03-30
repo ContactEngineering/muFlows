@@ -37,7 +37,7 @@ Class-based registration (legacy)
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Type
+from typing import Any, Callable, Dict, Optional, Type, Union
 
 import pydantic
 
@@ -58,8 +58,13 @@ class WorkflowEntry:
         Human-readable name shown in UIs.
     queue : str
         Queue name for backend routing.
-    dependencies : dict
-        Maps dependency key to workflow name.
+    dependencies : dict | callable | None
+        Upstream workflows that must complete before this one.
+        Can be a dict mapping access keys to workflow names/specs,
+        or a callable that enumerates dependencies at plan time.
+    produces : dict | callable | None
+        Downstream workflows spawned after this one completes (fan-out).
+        Same format as dependencies.
     parameters : type[pydantic.BaseModel] | None
         Pydantic model for parameter validation.  ``None`` means no
         parameters.
@@ -72,7 +77,8 @@ class WorkflowEntry:
     fn: Callable
     display_name: str = ""
     queue: str = "default"
-    dependencies: dict = field(default_factory=dict)
+    dependencies: Union[dict, Callable, None] = field(default_factory=dict)
+    produces: Union[dict, Callable, None] = field(default_factory=dict)
     parameters: Optional[Type[pydantic.BaseModel]] = None
     outputs: Optional[Type] = None
 
@@ -112,21 +118,44 @@ def register_workflow(
     *,
     display_name: str = "",
     queue: str = "default",
-    dependencies: dict = None,
+    dependencies: Union[dict, Callable] = None,
+    produces: Union[dict, Callable] = None,
     parameters: Optional[Type[pydantic.BaseModel]] = None,
     outputs: Optional[Type] = None,
 ) -> Callable:
     """Decorator that registers a function as a workflow.
+
+    Parameters
+    ----------
+    name : str
+        Unique workflow identifier (e.g., "myapp.analyse").
+    display_name : str, optional
+        Human-readable name for UIs.
+    queue : str, optional
+        Queue name for backend routing. Default: "default".
+    dependencies : dict or callable, optional
+        Upstream workflows that must complete before this one.
+        Can be a dict mapping access keys to workflow names/specs,
+        or a callable ``(subject_key, kwargs) -> Dict[str, WorkflowSpec]``.
+    produces : dict or callable, optional
+        Downstream workflows spawned after this one completes (fan-out).
+        Same format as dependencies.
+    parameters : type[pydantic.BaseModel], optional
+        Pydantic model for parameter validation.
+    outputs : type, optional
+        Class with ``files`` dict for output validation.
 
     Example
     -------
     >>> @register_workflow(
     ...     name="myapp.analyse",
     ...     display_name="Analyse",
+    ...     dependencies={"features": "myapp.features"},
     ...     parameters=MyParams,
     ...     outputs=MyOutputs,
     ... )
     ... def analyse(context):
+    ...     features = context.dependency("features").read_json("result.json")
     ...     ...
     """
     def decorator(fn: Callable) -> Callable:
@@ -136,6 +165,7 @@ def register_workflow(
             display_name=display_name,
             queue=queue,
             dependencies=dependencies or {},
+            produces=produces or {},
             parameters=parameters,
             outputs=outputs,
         )
@@ -172,6 +202,7 @@ def register(klass: Type) -> Type:
     display_name = getattr(meta, "display_name", "")
     queue = getattr(meta, "queue", "default")
     dependencies = getattr(meta, "dependencies", {})
+    produces = getattr(meta, "produces", {})
     parameters_cls = getattr(klass, "Parameters", None)
     # Only keep Parameters if it's a subclass that adds fields
     if parameters_cls is not None:
@@ -195,6 +226,7 @@ def register(klass: Type) -> Type:
         display_name=display_name,
         queue=queue,
         dependencies=dependencies,
+        produces=produces,
         parameters=parameters_cls,
     )
     # Store the original class on the entry for backward compatibility
