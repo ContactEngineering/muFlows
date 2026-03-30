@@ -131,6 +131,21 @@ class WorkflowContext:
 
     # ── Dependency access ───────────────────────────────────────────────
 
+    def has_dependency(self, key: str) -> bool:
+        """Check if a dependency is available.
+
+        Parameters
+        ----------
+        key : str
+            The dependency key (e.g., "loo_0", "surface_0").
+
+        Returns
+        -------
+        bool
+            True if the dependency is available, False otherwise.
+        """
+        return key in self._dependency_storages
+
     def dependency(self, key: str) -> "WorkflowContext":
         """Get a read-only context for accessing a dependency's outputs.
 
