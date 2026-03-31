@@ -39,6 +39,7 @@ class ExecutionBackend(Protocol):
     def submit_plan(
         self,
         plan: "WorkflowPlan",
+        on_node_start: Optional[Callable[[str], None]] = None,
         on_node_complete: Optional[Callable[[str], None]] = None,
         on_node_failure: Optional[Callable[[str, str], None]] = None,
     ) -> str:
@@ -52,6 +53,8 @@ class ExecutionBackend(Protocol):
         ----------
         plan : WorkflowPlan
             Complete workflow plan with all nodes and dependencies.
+        on_node_start : callable, optional
+            Callback when a node starts: (node_key) -> None
         on_node_complete : callable, optional
             Callback when a node completes: (node_key) -> None
         on_node_failure : callable, optional
@@ -139,6 +142,7 @@ class LocalBackend:
     def submit_plan(
         self,
         plan: "WorkflowPlan",
+        on_node_start: Optional[Callable[[str], None]] = None,
         on_node_complete: Optional[Callable[[str], None]] = None,
         on_node_failure: Optional[Callable[[str, str], None]] = None,
     ) -> str:
@@ -151,6 +155,8 @@ class LocalBackend:
         ----------
         plan : WorkflowPlan
             Complete workflow plan.
+        on_node_start : callable, optional
+            Callback when a node starts execution.
         on_node_complete : callable, optional
             Callback when a node completes successfully.
         on_node_failure : callable, optional
@@ -189,6 +195,9 @@ class LocalBackend:
 
                 for node in ready:
                     _log.debug(f"Executing node: {node.function} ({node.key[:16]}...)")
+
+                    if on_node_start:
+                        on_node_start(node.key)
 
                     # Build dependency paths using access keys (not node keys)
                     from muflow.planner import get_dependency_access_map
