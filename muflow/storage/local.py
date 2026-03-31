@@ -49,6 +49,72 @@ class LocalStorageBackend:
         self._written_files: set[str] = set()
         self._allowed_outputs = allowed_outputs
 
+    @classmethod
+    def is_result_cached(
+        cls,
+        base_path: Union[str, Path],
+        workflow_name: str,
+        subject_key: str,
+        kwargs: dict,
+    ) -> bool:
+        """Check if a workflow result is cached at the given base path.
+
+        This class method checks for the existence of a ``manifest.json``
+        file at the content-addressed storage location without instantiating
+        a full backend.
+
+        Parameters
+        ----------
+        base_path : str or Path
+            Base directory for workflow storage.
+        workflow_name : str
+            Name of the workflow.
+        subject_key : str
+            Subject identifier.
+        kwargs : dict
+            Workflow parameters.
+
+        Returns
+        -------
+        bool
+            True if a manifest.json exists at the computed storage prefix.
+        """
+        hash_dict = {"workflow": workflow_name, "subject": subject_key, **kwargs}
+        prefix = compute_prefix(hash_dict, base_prefix=str(base_path))
+        return (Path(prefix) / "manifest.json").exists()
+
+    @classmethod
+    def make_cache_checker(cls, base_path: Union[str, Path]):
+        """Create a cache checker function for use with WorkflowPlanner.
+
+        Parameters
+        ----------
+        base_path : str or Path
+            Base directory for workflow storage.
+
+        Returns
+        -------
+        callable
+            Function with signature (workflow_name, subject_key, kwargs) -> bool
+            suitable for passing to WorkflowPlanner's is_cached parameter.
+
+        Example
+        -------
+        >>> from muflow import WorkflowPlanner
+        >>> from muflow.storage import LocalStorageBackend
+        >>>
+        >>> planner = WorkflowPlanner(
+        ...     base_prefix="/tmp/output",
+        ...     is_cached=LocalStorageBackend.make_cache_checker("/tmp/output"),
+        ... )
+        """
+        base_path = str(base_path)
+
+        def is_cached(workflow_name: str, subject_key: str, kwargs: dict) -> bool:
+            return cls.is_result_cached(base_path, workflow_name, subject_key, kwargs)
+
+        return is_cached
+
     @property
     def storage_prefix(self) -> str:
         return str(self._path)

@@ -92,6 +92,7 @@ def run_plan_locally(
     kwargs: dict,
     output_dir: str | Path,
     verbose: bool = False,
+    use_cache: bool = True,
 ) -> LocalExecutionResult:
     """Run a workflow with all dependencies computed automatically.
 
@@ -112,6 +113,8 @@ def run_plan_locally(
         Directory for all workflow outputs.
     verbose : bool
         If True, print progress messages.
+    use_cache : bool
+        If True (default), skip execution of workflows that have cached results.
 
     Returns
     -------
@@ -139,6 +142,7 @@ def run_plan_locally(
     """
     from muflow import WorkflowPlanner
     from muflow.backends import LocalBackend
+    from muflow.storage import LocalStorageBackend
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -147,7 +151,9 @@ def run_plan_locally(
     if verbose:
         print(f"Planning {workflow_name}...")
 
-    planner = WorkflowPlanner(base_prefix=str(output_dir.absolute()))
+    base_path = str(output_dir.absolute())
+    is_cached = LocalStorageBackend.make_cache_checker(base_path) if use_cache else None
+    planner = WorkflowPlanner(base_prefix=base_path, is_cached=is_cached)
     plan = planner.build_plan(
         workflow_name=workflow_name,
         subject_key=subject_key,
