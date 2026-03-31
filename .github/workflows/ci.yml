@@ -21,7 +21,6 @@ jobs:
           pip install -e ".[dev]"
       - name: Run flake8
         run: |
-          cd muFlow
           flake8 .
 
   test:
@@ -29,8 +28,43 @@ jobs:
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
+    env:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: secret12
+      AWS_STORAGE_BUCKET_NAME: muflow-test
+      AWS_S3_ENDPOINT_URL: http://localhost:9000
     steps:
       - uses: actions/checkout@v4
+      - name: Start Minio
+        run: |
+          docker run -d \
+            --name minio \
+            -p 9000:9000 \
+            -p 9001:9001 \
+            -e MINIO_ROOT_USER=$AWS_ACCESS_KEY_ID \
+            -e MINIO_ROOT_PASSWORD=$AWS_SECRET_ACCESS_KEY \
+            minio/minio:latest \
+            server /data --console-address ":9001"
+      - name: Create bucket
+        run: |
+          curl https://dl.min.io/client/mc/release/linux-amd64/mc --create-dirs -o $HOME/minio-binaries/mc
+          chmod +x $HOME/minio-binaries/mc
+          export PATH=$PATH:$HOME/minio-binaries/
+
+          # Wait for Minio to be ready
+          echo "Waiting for Minio to be ready..."
+          for i in {1..30}; do
+            if mc alias set minio $AWS_S3_ENDPOINT_URL $AWS_ACCESS_KEY_ID $AWS_SECRET_ACCESS_KEY 2>/dev/null; then
+              echo "Minio is ready!"
+              break
+            fi
+            echo "Attempt $i: Minio not ready yet, waiting..."
+            sleep 2
+          done
+
+          # Verify the alias was set successfully
+          mc alias list minio
+          mc mb --ignore-existing minio/$AWS_STORAGE_BUCKET_NAME
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -41,5 +75,4 @@ jobs:
           pip install -e ".[s3,test]"
       - name: Run tests
         run: |
-          cd muFlow
           pytest
