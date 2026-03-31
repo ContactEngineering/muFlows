@@ -97,9 +97,13 @@ except ImportError:
 # I/O utilities
 from muflow.io import (
     ExtendedJSONEncoder,
+    ResourceManager,
     dumps_json,
+    is_local_file,
+    is_url,
     load_xarray_from_bytes,
     loads_json,
+    resolve_uri,
     save_xarray_to_bytes,
 )
 
@@ -149,6 +153,11 @@ __all__ = [
     "loads_json",
     "load_xarray_from_bytes",
     "save_xarray_to_bytes",
+    # Resource fetching
+    "is_url",
+    "is_local_file",
+    "resolve_uri",
+    "ResourceManager",
     # Testing
     "LocalExecutionResult",
     "run_plan_locally",

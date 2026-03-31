@@ -138,6 +138,74 @@ pip install muflows[test]
 pytest
 ```
 
+### Testing Utilities
+
+muFlow provides utilities for testing workflows with automatic dependency resolution:
+
+```python
+from muflow import run_plan_locally
+
+# Run a workflow with all dependencies resolved automatically
+result = run_plan_locally(
+    workflow_name="myapp.training",
+    subject_key="dataset:test",
+    kwargs={"param": "value"},
+    output_dir="/tmp/test_output",
+)
+
+# Check if workflow succeeded
+assert result.success
+
+# Read output files
+data = result.read_json("result.json")
+model = result.read_file("model.pkl")
+
+# List all output files
+files = result.list_files()
+```
+
+The `LocalExecutionResult` provides:
+- `success`: Whether the workflow completed without errors
+- `plan`: The executed `WorkflowPlan`
+- `output_dir`: Path to the root workflow's output directory
+- `root_output_dir`: Path to the base output directory
+- `error`: Error message if `success` is False
+- `read_json(filename)`: Read a JSON file from the output
+- `read_file(filename)`: Read raw bytes from the output
+- `list_files()`: List all files in the output directory
+
+## Resource Management
+
+muFlow provides utilities for transparent resource fetching from local files or URLs:
+
+```python
+from muflow import ResourceManager, is_url, is_local_file, resolve_uri
+
+# Check URI type
+is_url("https://example.com/data.nc")  # True
+is_url("/local/path/data.nc")  # False
+is_local_file("file:///path/data.nc")  # True
+
+# Resolve a single URI (downloads URLs to temp files)
+local_path = resolve_uri("https://example.com/data.nc")
+
+# Use ResourceManager for automatic cleanup
+with ResourceManager() as rm:
+    # Resolve multiple URIs - local files returned as-is,
+    # URLs downloaded to temp files
+    path1 = rm.resolve("/local/file.nc")
+    path2 = rm.resolve("https://example.com/remote.nc")
+
+    # Use the files...
+
+# Temp files automatically cleaned up on context exit
+```
+
+Supported URI schemes:
+- Local paths: `/path/to/file.nc`, `relative/path.nc`
+- File URIs: `file:///path/to/file.nc`
+- HTTP/HTTPS: `https://example.com/data.nc`
+
 ## License
 
 MIT
