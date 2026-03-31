@@ -106,6 +106,9 @@ class LocalBackend:
     registry_get : callable, optional
         Function to get workflow entries: (name) -> WorkflowEntry
         Defaults to `muflow.registry.get`.
+    progress_reporter : callable, optional
+        Function called with (current, total, message) for progress updates.
+        Defaults to printing to stdout.
 
     Example
     -------
@@ -122,7 +125,12 @@ class LocalBackend:
     >>> print(f"Completed: {plan_id}")
     """
 
-    def __init__(self, base_path: str, registry_get: Optional[Callable] = None):
+    def __init__(
+        self,
+        base_path: str,
+        registry_get: Optional[Callable] = None,
+        progress_reporter: Optional[Callable[[int, int, str], None]] = None,
+    ):
         """Initialize the local backend.
 
         Parameters
@@ -132,11 +140,15 @@ class LocalBackend:
         registry_get : callable, optional
             Function to get workflow entries by name.
             Defaults to `muflow.registry.get`.
+        progress_reporter : callable, optional
+            Function called with (current, total, message) for progress updates.
+            Defaults to printing to stdout with right-aligned percentage.
         """
         from muflow import registry
 
         self.base_path = base_path
         self.registry_get = registry_get or registry.get
+        self.progress_reporter = progress_reporter
         self._plan_states: dict[str, str] = {}
 
     def submit_plan(
@@ -211,6 +223,7 @@ class LocalBackend:
                         path=node.storage_prefix,
                         kwargs=node.kwargs,
                         dependency_paths=dependency_paths,
+                        progress_reporter=self.progress_reporter,
                     )
 
                     # Build payload

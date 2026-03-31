@@ -15,7 +15,9 @@ from muflow.storage.base import StorageBackend
 def _print_progress(current: int, total: int, message: str) -> None:
     """Default progress reporter that prints to stdout."""
     pct = current / total * 100 if total > 0 else 0
-    print(f"[{pct:.1f}%] {message}")
+    # Right-align percentage in 6 characters (e.g., "100.0%")
+    pct_str = f"{pct:.1f}%".rjust(6)
+    print(f"  [{pct_str}] {message}")
 
 
 class WorkflowContext:
@@ -194,6 +196,7 @@ def create_local_context(
     path: str,
     kwargs: dict,
     dependency_paths: dict = None,
+    progress_reporter: Optional[Callable[[int, int, str], None]] = None,
 ) -> WorkflowContext:
     """Create a WorkflowContext backed by local filesystem.
 
@@ -205,6 +208,9 @@ def create_local_context(
         Workflow parameters.
     dependency_paths : dict[str, str], optional
         Mapping from dependency key to local path.
+    progress_reporter : callable, optional
+        Function called with (current, total, message) for progress updates.
+        Defaults to printing to stdout with right-aligned percentage.
 
     Returns
     -------
@@ -232,4 +238,5 @@ def create_local_context(
         storage=storage,
         kwargs=kwargs,
         dependency_storages=dep_storages,
+        progress_reporter=progress_reporter,
     )
