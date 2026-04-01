@@ -4,39 +4,36 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
+import pydantic
 
-from muflow import create_local_context, WorkflowImplementation
+from muflow import WorkflowEntry, create_local_context
 from muflow.executor import ExecutionPayload, ExecutionResult, execute_workflow
 
 
-class MockWorkflow(WorkflowImplementation):
-    """A simple test workflow that writes a result file."""
-
-    class Meta:
-        name = "test.mock_workflow"
-
-    class Parameters(WorkflowImplementation.Parameters):
-        user_id: int = 0
-
-    def execute(self, ctx):
-        ctx.save_json("result.json", {"status": "ok", "user_id": self.kwargs.user_id})
+def mock_workflow_fn(ctx):
+    user_id = ctx.kwargs.user_id if ctx.kwargs else 0
+    ctx.save_json("result.json", {"status": "ok", "user_id": user_id})
 
 
-class FailingWorkflow(WorkflowImplementation):
-    """A workflow that always fails."""
+class MockParams(pydantic.BaseModel):
+    user_id: int = 0
 
-    class Meta:
-        name = "test.failing_workflow"
 
-    def execute(self, ctx):
-        raise ValueError("Intentional failure for testing")
+def failing_workflow_fn(ctx):
+    raise ValueError("Intentional failure for testing")
 
 
 # Simple registry for tests
 TEST_REGISTRY = {
-    "test.mock_workflow": MockWorkflow,
-    "test.failing_workflow": FailingWorkflow,
+    "test.mock_workflow": WorkflowEntry(
+        name="test.mock_workflow",
+        fn=mock_workflow_fn,
+        parameters=MockParams,
+    ),
+    "test.failing_workflow": WorkflowEntry(
+        name="test.failing_workflow",
+        fn=failing_workflow_fn,
+    ),
 }
 
 
@@ -252,14 +249,15 @@ class TestExecuteWorkflow:
     def test_protected_file_write_fails(self):
         """Workflow that writes to a protected file should fail."""
 
-        class BadWorkflow(WorkflowImplementation):
-            class Meta:
-                name = "test.bad_workflow"
+        def bad_workflow_fn(ctx):
+            ctx.save_json("context.json", {})
 
-            def execute(self, ctx):
-                ctx.save_json("context.json", {})
-
-        registry = {"test.bad_workflow": BadWorkflow}
+        registry = {
+            "test.bad_workflow": WorkflowEntry(
+                name="test.bad_workflow",
+                fn=bad_workflow_fn,
+            )
+        }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = ExecutionPayload(
@@ -274,3 +272,21 @@ class TestExecuteWorkflow:
 
             assert result.success is False
             assert "protected" in result.error_message
+
+    def test_executor_writes_context_json(self):
+        """Should write context.json before execution."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = ExecutionPayload(
+                workflow_name="test.mock_workflow",
+                kwargs={"user_id": 1},
+                storage_prefix=tmpdir,
+                context_data={"foo": "bar"}
+            )
+            ctx = create_local_context(path=tmpdir, kwargs=payload.kwargs)
+
+            execute_workflow(payload, ctx, get_test_implementation)
+
+            context_path = Path(tmpdir) / "context.json"
+            assert context_path.exists()
+            context_data = json.loads(context_path.read_text())
+            assert context_data == {"foo": "bar"}

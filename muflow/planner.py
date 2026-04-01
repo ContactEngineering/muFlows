@@ -33,9 +33,10 @@ from __future__ import annotations
 import logging
 from typing import Callable, Dict, Optional, Set
 
-from muflow.dependencies import enumerate_specs, WorkflowSpec
+from muflow.dependencies import enumerate_specs
 from muflow.plan import WorkflowNode, WorkflowPlan
-from muflow.registry import get as get_entry, WorkflowEntry
+from muflow.registry import WorkflowEntry
+from muflow.registry import get as get_entry
 from muflow.storage import compute_prefix
 
 _log = logging.getLogger(__name__)
@@ -154,9 +155,16 @@ class WorkflowPlanner:
         if _resolving is None:
             _resolving = set()
 
+        # Get workflow entry from registry
+        entry = get_entry(workflow_name)
+        if entry is None:
+            raise ValueError(f"Unknown workflow: {workflow_name}")
+
         # Compute content-addressed storage prefix (also used as node key)
         hash_dict = {"workflow": workflow_name, "subject": subject_key, **kwargs}
-        storage_prefix = compute_prefix(hash_dict, base_prefix=self._base_prefix)
+        storage_prefix = compute_prefix(
+            hash_dict, base_prefix=self._base_prefix, identity_keys=entry.identity_keys
+        )
         node_key = storage_prefix
 
         # Cycle detection - check BEFORE checking nodes to catch cycles
@@ -175,11 +183,6 @@ class WorkflowPlanner:
         try:
             # Check cache
             cached = self._is_cached(workflow_name, subject_key, kwargs)
-
-            # Get workflow entry from registry
-            entry = get_entry(workflow_name)
-            if entry is None:
-                raise ValueError(f"Unknown workflow: {workflow_name}")
 
             # Get output files from entry (if declared)
             output_files = []
@@ -207,38 +210,82 @@ class WorkflowPlanner:
                 return node_key
 
             # Resolve dependencies (upstream - must complete before this node)
-            dep_specs = enumerate_specs(entry.dependencies, subject_key, kwargs)
-            for dep_key, spec in dep_specs.items():
-                dep_node_key = self._resolve(
+            self._resolve_dependencies(node, entry, nodes, _resolving)
+
+            # Resolve productions (downstream - spawned after this node completes)
+            self._resolve_productions(node, entry, nodes, _resolving)
+
+            return node_key
+
+        finally:
+            _resolving.discard(node_key)
+
+    def _resolve_dependencies(
+        self,
+        node: WorkflowNode,
+        entry: WorkflowEntry,
+        nodes: Dict[str, WorkflowNode],
+        _resolving: Set[str],
+    ) -> None:
+        """Resolve dependencies for a node.
+
+        Parameters
+        ----------
+        node : WorkflowNode
+            The node to resolve dependencies for.
+        entry : WorkflowEntry
+            The workflow entry for this node.
+        nodes : dict
+            Accumulator for discovered nodes (mutated).
+        _resolving : set
+            Set of node keys currently being resolved.
+        """
+        dep_specs = enumerate_specs(entry.dependencies, node.subject_key, node.kwargs)
+        for dep_key, spec in dep_specs.items():
+            dep_node_key = self._resolve(
+                spec.workflow,
+                spec.subject_key,
+                spec.kwargs,
+                nodes,
+                _resolving,
+            )
+            node.depends_on.append(dep_node_key)
+            _log.debug(f"  {node.function} depends on {spec.workflow} ({dep_key})")
+
+    def _resolve_productions(
+        self,
+        node: WorkflowNode,
+        entry: WorkflowEntry,
+        nodes: Dict[str, WorkflowNode],
+        _resolving: Set[str],
+    ) -> None:
+        """Resolve productions for a node.
+
+        Parameters
+        ----------
+        node : WorkflowNode
+            The node to resolve productions for.
+        entry : WorkflowEntry
+            The workflow entry for this node.
+        nodes : dict
+            Accumulator for discovered nodes (mutated).
+        _resolving : set
+            Set of node keys currently being resolved.
+        """
+        produces = getattr(entry, "produces", None)
+        if produces:
+            prod_specs = enumerate_specs(produces, node.subject_key, node.kwargs)
+            for prod_key, spec in prod_specs.items():
+                prod_node_key = self._resolve(
                     spec.workflow,
                     spec.subject_key,
                     spec.kwargs,
                     nodes,
                     _resolving,
                 )
-                node.depends_on.append(dep_node_key)
-                _log.debug(f"  {workflow_name} depends on {spec.workflow} ({dep_key})")
-
-            # Resolve productions (downstream - spawned after this node completes)
-            produces = getattr(entry, "produces", None)
-            if produces:
-                prod_specs = enumerate_specs(produces, subject_key, kwargs)
-                for prod_key, spec in prod_specs.items():
-                    prod_node_key = self._resolve(
-                        spec.workflow,
-                        spec.subject_key,
-                        spec.kwargs,
-                        nodes,
-                        _resolving,
-                    )
-                    # The produced workflow depends on this node
-                    nodes[prod_node_key].depends_on.append(node_key)
-                    _log.debug(f"  {workflow_name} produces {spec.workflow} ({prod_key})")
-
-            return node_key
-
-        finally:
-            _resolving.discard(node_key)
+                # The produced workflow depends on this node
+                nodes[prod_node_key].depends_on.append(node.key)
+                _log.debug(f"  {node.function} produces {spec.workflow} ({prod_key})")
 
     def _compute_dependency_keys(
         self,
@@ -262,9 +309,7 @@ class WorkflowPlanner:
         dict[str, str]
             Mapping from access key to node key.
         """
-        dep_specs = enumerate_specs(
-            entry.dependencies, node.subject_key, node.kwargs
-        )
+        dep_specs = enumerate_specs(entry.dependencies, node.subject_key, node.kwargs)
 
         result = {}
         for access_key, spec in dep_specs.items():
@@ -274,7 +319,14 @@ class WorkflowPlanner:
                 "subject": spec.subject_key,
                 **spec.kwargs,
             }
-            dep_node_key = compute_prefix(hash_dict, base_prefix=self._base_prefix)
+            # Look up dependency's entry to get its identity_keys
+            dep_entry = get_entry(spec.workflow)
+            dep_identity_keys = dep_entry.identity_keys if dep_entry else None
+            dep_node_key = compute_prefix(
+                hash_dict,
+                base_prefix=self._base_prefix,
+                identity_keys=dep_identity_keys,
+            )
             result[access_key] = dep_node_key
 
         return result

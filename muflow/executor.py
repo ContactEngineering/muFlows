@@ -36,6 +36,8 @@ class ExecutionPayload(pydantic.BaseModel):
         Parameters to pass to the workflow.
     storage_prefix : str
         S3 key prefix or local path for output files.
+    context_data : dict
+        Domain-specific identity/loading data (stored as context.json).
     dependency_prefixes : dict[str, str]
         Mapping from dependency key to storage prefix.
     queue : str | None
@@ -48,6 +50,7 @@ class ExecutionPayload(pydantic.BaseModel):
     workflow_name: str
     kwargs: dict
     storage_prefix: str
+    context_data: dict = {}
     dependency_prefixes: dict[str, str] = {}
     queue: Optional[str] = None
 
@@ -102,11 +105,12 @@ def execute_workflow(
 
     This is the core execution function used by all backends.  It:
     1. Looks up the ``WorkflowEntry`` by name
-    2. Validates kwargs against the entry's ``parameters`` model (if any)
+    2. Writes ``context.json`` to storage (from payload.context_data)
+    3. Validates kwargs against the entry's ``parameters`` model (if any)
        and stores the result on ``context._parameters``
-    3. Calls ``entry.fn(context)``
-    4. Writes ``manifest.json`` via the storage backend (always, even on error)
-    5. Returns success/failure result with the list of files written
+    4. Calls ``entry.fn(context)``
+    5. Writes ``manifest.json`` via the storage backend (always, even on error)
+    6. Returns success/failure result with the list of files written
 
     Parameters
     ----------
@@ -126,24 +130,24 @@ def execute_workflow(
     from muflow.registry import WorkflowEntry
 
     try:
+        # Write context.json (protected, so use internal storage method if possible)
+        # For now, we assume the backend allows the executor to write it
+        # via a side-channel or by relaxing PROTECTED_FILES for this call.
+        context.storage.save_json(
+            "context.json", payload.context_data, allow_protected=True
+        )
+
         # Look up the workflow entry
         entry = get_entry(payload.workflow_name)
 
-        # If get_entry returned a class (legacy caller), wrap it
         if not isinstance(entry, WorkflowEntry):
-            klass = entry
-            def _legacy_fn(ctx):
-                impl = klass(**payload.kwargs)
-                return impl.execute(ctx)
-            entry = WorkflowEntry(
-                name=payload.workflow_name, fn=_legacy_fn
-            )
+            raise TypeError(f"Registry returned non-WorkflowEntry: {type(entry)}")
 
         # Validate parameters and attach to context
         if entry.parameters is not None:
-            context._parameters = entry.parameters(**payload.kwargs)
+            context._kwargs = entry.parameters(**payload.kwargs)
         else:
-            context._parameters = None
+            context._kwargs = payload.kwargs
 
         # Execute the workflow
         entry.fn(context)

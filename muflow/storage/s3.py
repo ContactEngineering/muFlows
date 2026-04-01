@@ -39,9 +39,10 @@ class S3StorageBackend:
         s3_client=None,
         hash_dict: dict = None,
         base_prefix: str = "muflow",
+        identity_keys: list[str] = None,
     ):
         if hash_dict is not None:
-            self._prefix = compute_prefix(hash_dict, base_prefix)
+            self._prefix = compute_prefix(hash_dict, base_prefix, identity_keys)
         else:
             self._prefix = storage_prefix
         self._bucket = bucket
@@ -50,6 +51,7 @@ class S3StorageBackend:
         if s3_client is None:
             try:
                 import boto3
+
                 self._s3 = boto3.client("s3")
             except ImportError:
                 raise ImportError(
@@ -76,17 +78,25 @@ class S3StorageBackend:
         validate_filename(filename)
         validate_writable(filename, self._written_files)
         self._s3.put_object(
-            Bucket=self._bucket, Key=self._key(filename), Body=data,
+            Bucket=self._bucket,
+            Key=self._key(filename),
+            Body=data,
         )
         self._written_files.add(filename)
 
-    def save_json(self, filename: str, data: Any) -> None:
+    def save_json(
+        self, filename: str, data: Any, allow_protected: bool = False
+    ) -> None:
         validate_filename(filename)
-        validate_writable(filename, self._written_files)
+        validate_writable(
+            filename, self._written_files, allow_protected=allow_protected
+        )
         body = dumps_json(data).encode("utf-8")
         self._s3.put_object(
-            Bucket=self._bucket, Key=self._key(filename),
-            Body=body, ContentType="application/json",
+            Bucket=self._bucket,
+            Key=self._key(filename),
+            Body=body,
+            ContentType="application/json",
         )
         self._written_files.add(filename)
 
@@ -95,8 +105,10 @@ class S3StorageBackend:
         validate_writable(filename, self._written_files)
         data = save_xarray_to_bytes(dataset)
         self._s3.put_object(
-            Bucket=self._bucket, Key=self._key(filename),
-            Body=data, ContentType="application/x-netcdf",
+            Bucket=self._bucket,
+            Key=self._key(filename),
+            Body=data,
+            ContentType="application/x-netcdf",
         )
         self._written_files.add(filename)
 
@@ -151,6 +163,8 @@ class S3StorageBackend:
         }
         body = dumps_json(manifest).encode("utf-8")
         self._s3.put_object(
-            Bucket=self._bucket, Key=self._key("manifest.json"),
-            Body=body, ContentType="application/json",
+            Bucket=self._bucket,
+            Key=self._key("manifest.json"),
+            Body=body,
+            ContentType="application/json",
         )

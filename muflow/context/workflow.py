@@ -31,7 +31,7 @@ class WorkflowContext:
     storage : StorageBackend
         The storage backend for file I/O (LocalStorageBackend, S3StorageBackend, etc.)
     kwargs : dict
-        Workflow parameters (raw dict).
+        Raw workflow parameters.
     dependency_storages : dict[str, StorageBackend], optional
         Mapping from dependency key to storage backend for that dependency.
     progress_reporter : callable, optional
@@ -40,9 +40,7 @@ class WorkflowContext:
 
     Attributes
     ----------
-    kwargs : dict
-        Raw parameters dict.
-    parameters : Any
+    kwargs : Any
         Validated parameters (pydantic model), set by the executor after
         validation. ``None`` if no parameter model is registered.
 
@@ -68,22 +66,17 @@ class WorkflowContext:
         progress_reporter: Optional[Callable[[int, int, str], None]] = None,
     ):
         self._storage = storage
-        self._kwargs = kwargs
+        self._raw_kwargs = kwargs
         self._dependency_storages = dependency_storages or {}
         self._progress_reporter = progress_reporter or _print_progress
-        self._parameters = None  # Set by executor for function-based workflows
+        self._kwargs = kwargs  # Set by executor for function-based workflows
 
     # ── Parameters ──────────────────────────────────────────────────────
 
     @property
-    def kwargs(self) -> dict:
-        """Raw parameters dict."""
-        return self._kwargs
-
-    @property
-    def parameters(self) -> Any:
+    def kwargs(self) -> Any:
         """Validated parameters (pydantic model), or ``None``."""
-        return self._parameters
+        return self._kwargs
 
     # ── Storage ─────────────────────────────────────────────────────────
 
@@ -103,9 +96,11 @@ class WorkflowContext:
         """Save raw bytes to a file."""
         self._storage.save_file(filename, data)
 
-    def save_json(self, filename: str, data: Any) -> None:
+    def save_json(
+        self, filename: str, data: Any, allow_protected: bool = False
+    ) -> None:
         """Save data as JSON."""
-        self._storage.save_json(filename, data)
+        self._storage.save_json(filename, data, allow_protected=allow_protected)
 
     def save_xarray(self, filename: str, dataset: xr.Dataset) -> None:
         """Save an xarray Dataset as NetCDF."""
@@ -231,8 +226,7 @@ def create_local_context(
     dep_storages = {}
     if dependency_paths:
         dep_storages = {
-            key: LocalStorageBackend(p)
-            for key, p in dependency_paths.items()
+            key: LocalStorageBackend(p) for key, p in dependency_paths.items()
         }
     return WorkflowContext(
         storage=storage,

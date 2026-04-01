@@ -6,30 +6,25 @@ class to specify output files with their types and optional schemas.
 
 Example
 -------
->>> from muflow import WorkflowImplementation, OutputFile
+>>> from muflow import OutputFile, register_workflow
 >>> import pydantic
 >>>
 >>> class ResultSchema(pydantic.BaseModel):
 ...     accuracy: float
 ...     loss: float
 >>>
->>> class MyWorkflow(WorkflowImplementation):
-...     class Meta:
-...         name = "myapp.my_workflow"
-...         display_name = "My Workflow"
-...
-...     class Outputs:
-...         files = {
-...             "result.json": OutputFile(
-...                 file_type="json",
-...                 description="Training results",
-...                 schema=ResultSchema,
-...             ),
-...             "model.nc": OutputFile(
-...                 file_type="netcdf",
-...                 description="Trained model weights",
-...             ),
-...         }
+>>> class MyOutputs:
+...     files = {
+...         "result.json": OutputFile(
+...             file_type="json",
+...             description="Training results",
+...             schema=ResultSchema,
+...         ),
+...     }
+>>>
+>>> @register_workflow(name="myapp.my_workflow", outputs=MyOutputs)
+... def my_workflow(context):
+...     pass
 """
 
 from dataclasses import dataclass

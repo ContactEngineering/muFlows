@@ -80,9 +80,6 @@ from muflow.storage import (
     compute_prefix,
 )
 
-# Workflow base class
-from muflow.workflow import WorkflowImplementation
-
 # Lambda backend factory (requires boto3)
 try:
     from muflow.backends.lambda_backend import create_lambda_handler  # noqa: F401
@@ -116,8 +113,6 @@ __all__ = [
     # Context
     "WorkflowContext",
     "create_local_context",
-    # Workflow
-    "WorkflowImplementation",
     # Outputs
     "OutputFile",
     "get_outputs_schema",

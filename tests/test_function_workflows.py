@@ -51,6 +51,7 @@ class TestRegisterWorkflow:
             queue="analysis",
             dependencies={"dep": "other.workflow"},
             parameters=Params,
+            identity_keys=["threshold"],
         )
         def full(context):
             pass
@@ -60,6 +61,7 @@ class TestRegisterWorkflow:
         assert entry.queue == "analysis"
         assert entry.dependencies == {"dep": "other.workflow"}
         assert entry.parameters is Params
+        assert entry.identity_keys == ["threshold"]
 
     def test_decorator_returns_original_function(self):
         @register_workflow(name="test.identity")
@@ -75,6 +77,7 @@ class TestRegisterWorkflow:
             pass
 
         with pytest.raises(AlreadyRegisteredException):
+
             @register_workflow(name="test.dup")
             def second(context):
                 pass
@@ -127,9 +130,7 @@ class TestFunctionWorkflowExecution:
             )
             ctx = create_local_context(path=tmpdir, kwargs={})
 
-            result = execute_workflow(
-                payload, ctx, lambda name: get(name)
-            )
+            result = execute_workflow(payload, ctx, lambda name: get(name))
 
             assert result.success is True
             assert "result.json" in result.files_written
@@ -145,7 +146,7 @@ class TestFunctionWorkflowExecution:
             parameters=MyParams,
         )
         def scaled(context):
-            s = context.parameters.scale
+            s = context.kwargs.scale
             context.save_json("result.json", {"scaled_value": 10 * s})
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -156,9 +157,7 @@ class TestFunctionWorkflowExecution:
             )
             ctx = create_local_context(path=tmpdir, kwargs=payload.kwargs)
 
-            result = execute_workflow(
-                payload, ctx, lambda name: get(name)
-            )
+            result = execute_workflow(payload, ctx, lambda name: get(name))
 
             assert result.success is True
             data = ctx.read_json("result.json")
@@ -184,9 +183,7 @@ class TestFunctionWorkflowExecution:
             )
             ctx = create_local_context(path=tmpdir, kwargs=payload.kwargs)
 
-            result = execute_workflow(
-                payload, ctx, lambda name: get(name)
-            )
+            result = execute_workflow(payload, ctx, lambda name: get(name))
 
             assert result.success is False
             assert "required_field" in result.error_message
@@ -204,9 +201,7 @@ class TestFunctionWorkflowExecution:
             )
             ctx = create_local_context(path=tmpdir, kwargs={})
 
-            result = execute_workflow(
-                payload, ctx, lambda name: get(name)
-            )
+            result = execute_workflow(payload, ctx, lambda name: get(name))
 
             assert result.success is False
             assert "kaboom" in result.error_message
@@ -232,7 +227,8 @@ class TestFunctionWorkflowExecution:
     def test_parameters_none_when_not_defined(self):
         @register_workflow(name="test.noparam")
         def noparam(context):
-            assert context.parameters is None
+            # For non-validated workflows, kwargs returns the raw dict
+            assert context.kwargs == {}
             context.save_json("ok.json", {"ok": True})
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -242,40 +238,5 @@ class TestFunctionWorkflowExecution:
                 storage_prefix=tmpdir,
             )
             ctx = create_local_context(path=tmpdir, kwargs={})
-            result = execute_workflow(
-                payload, ctx, lambda name: get(name)
-            )
+            result = execute_workflow(payload, ctx, lambda name: get(name))
             assert result.success is True
-
-
-# ── Legacy class compatibility ──────────────────────────────────────────────
-
-
-class TestLegacyClassViaExecutor:
-    """Verify that passing a raw class to get_entry still works."""
-
-    def test_legacy_class_through_executor(self):
-        from muflow import WorkflowImplementation
-
-        class LegacyWorkflow(WorkflowImplementation):
-            class Meta:
-                name = "test.legacy"
-
-            def execute(self, ctx):
-                ctx.save_json("legacy.json", {"from": "class"})
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            payload = ExecutionPayload(
-                workflow_name="test.legacy",
-                kwargs={},
-                storage_prefix=tmpdir,
-            )
-            ctx = create_local_context(path=tmpdir, kwargs={})
-
-            # Pass a raw class (not a WorkflowEntry) — executor wraps it
-            result = execute_workflow(
-                payload, ctx, lambda name: LegacyWorkflow
-            )
-
-            assert result.success is True
-            assert ctx.read_json("legacy.json") == {"from": "class"}

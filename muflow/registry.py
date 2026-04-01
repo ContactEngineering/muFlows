@@ -37,12 +37,12 @@ Class-based registration (legacy)
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, Type, Union
+from typing import Callable, Dict, List, Optional, Type, Union
 
 import pydantic
 
-
 # ── WorkflowEntry ──────────────────────────────────────────────────────────
+
 
 @dataclass
 class WorkflowEntry:
@@ -71,6 +71,9 @@ class WorkflowEntry:
     outputs : type | None
         An inner ``Outputs`` class with a ``files`` dict mapping filenames
         to ``OutputFile`` descriptors.  Used for output validation.
+    identity_keys : list[str] | None
+        List of keys in kwargs that define the workflow's identity for hashing.
+        If None, all kwargs are used.
     """
 
     name: str
@@ -81,6 +84,7 @@ class WorkflowEntry:
     produces: Union[dict, Callable, None] = field(default_factory=dict)
     parameters: Optional[Type[pydantic.BaseModel]] = None
     outputs: Optional[Type] = None
+    identity_keys: Optional[List[str]] = None
 
 
 # ── Registry storage ───────────────────────────────────────────────────────
@@ -90,6 +94,7 @@ _entries_by_display_name: Dict[str, WorkflowEntry] = {}
 
 
 # ── Exceptions ─────────────────────────────────────────────────────────────
+
 
 class RegistryError(Exception):
     """Base exception for registry errors."""
@@ -113,6 +118,7 @@ class NotRegisteredException(RegistryError):
 
 # ── Function-based registration (preferred) ────────────────────────────────
 
+
 def register_workflow(
     name: str,
     *,
@@ -122,6 +128,7 @@ def register_workflow(
     produces: Union[dict, Callable] = None,
     parameters: Optional[Type[pydantic.BaseModel]] = None,
     outputs: Optional[Type] = None,
+    identity_keys: Optional[List[str]] = None,
 ) -> Callable:
     """Decorator that registers a function as a workflow.
 
@@ -144,6 +151,8 @@ def register_workflow(
         Pydantic model for parameter validation.
     outputs : type, optional
         Class with ``files`` dict for output validation.
+    identity_keys : list[str], optional
+        List of keys in kwargs that define the workflow's identity for hashing.
 
     Example
     -------
@@ -153,11 +162,13 @@ def register_workflow(
     ...     dependencies={"features": "myapp.features"},
     ...     parameters=MyParams,
     ...     outputs=MyOutputs,
+    ...     identity_keys=["id", "version"],
     ... )
     ... def analyse(context):
     ...     features = context.dependency("features").read_json("result.json")
     ...     ...
     """
+
     def decorator(fn: Callable) -> Callable:
         entry = WorkflowEntry(
             name=name,
@@ -168,74 +179,49 @@ def register_workflow(
             produces=produces or {},
             parameters=parameters,
             outputs=outputs,
+            identity_keys=identity_keys,
         )
         _register_entry(entry)
         return fn
+
     return decorator
 
 
-# ── Class-based registration (legacy) ──────────────────────────────────────
+# ── Legacy registration (class-based) ──────────────────────────────────
+
 
 def register(klass: Type) -> Type:
-    """Register a ``WorkflowImplementation`` subclass.
+    """Decorator for class-based workflow registration (legacy).
 
-    Can be used as a decorator or called directly.  Internally wraps the
-    class in a ``WorkflowEntry``.
-
-    Parameters
-    ----------
-    klass : Type
-        A ``WorkflowImplementation`` subclass with a ``Meta.name`` attribute.
-
-    Returns
-    -------
-    Type
-        The registered class (unchanged).
+    Used for ``WorkflowImplementation`` subclasses.
     """
-    meta_name = getattr(getattr(klass, "Meta", None), "name", None)
-    if not meta_name:
-        raise ValueError(
-            f"Workflow class {klass.__name__} has no Meta.name attribute."
-        )
+    # Create an entry from the class Meta
+    meta = getattr(klass, "Meta", None)
+    if meta is None:
+        raise RegistryError(f"Class {klass.__name__} must have a Meta inner class.")
 
-    meta = klass.Meta
-    display_name = getattr(meta, "display_name", "")
-    queue = getattr(meta, "queue", "default")
-    dependencies = getattr(meta, "dependencies", {})
-    produces = getattr(meta, "produces", {})
-    parameters_cls = getattr(klass, "Parameters", None)
-    # Only keep Parameters if it's a subclass that adds fields
-    if parameters_cls is not None:
-        try:
-            if not parameters_cls.model_fields:
-                parameters_cls = None
-        except AttributeError:
-            parameters_cls = None
-
-    def _class_wrapper(context):
-        """Wrapper that instantiates the class and calls execute()."""
-        if context.parameters is not None:
-            impl = klass(**context.parameters.model_dump())
-        else:
-            impl = klass()
-        return impl.execute(context)
+    # Create the function wrapper for the class-based execute()
+    def wrapper(context):
+        obj = klass()
+        return obj.execute(context)
 
     entry = WorkflowEntry(
-        name=meta_name,
-        fn=_class_wrapper,
-        display_name=display_name,
-        queue=queue,
-        dependencies=dependencies,
-        produces=produces,
-        parameters=parameters_cls,
+        name=getattr(meta, "name"),
+        fn=wrapper,
+        display_name=getattr(meta, "display_name", ""),
+        queue=getattr(meta, "queue", "default"),
+        dependencies=getattr(meta, "dependencies", {}),
+        produces=getattr(meta, "produces", {}),
+        parameters=getattr(meta, "parameters", None),
+        outputs=getattr(klass, "Outputs", None),
+        identity_keys=getattr(meta, "identity_keys", None),
     )
-    # Store the original class on the entry for backward compatibility
-    entry._class = klass  # noqa: SLF001
     _register_entry(entry)
     return klass
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────
+
 
 def _register_entry(entry: WorkflowEntry) -> None:
     """Store a WorkflowEntry in the registry."""
@@ -247,6 +233,7 @@ def _register_entry(entry: WorkflowEntry) -> None:
 
 
 # ── Lookup ─────────────────────────────────────────────────────────────────
+
 
 def get(name: str) -> Optional[WorkflowEntry]:
     """Get a registered workflow by name.

@@ -30,9 +30,14 @@ class WorkflowContext(Protocol):
     file I/O to the storage backend, which enforces path traversal
     protection, write-once semantics, and protected files.
 
-    The concrete ``WorkflowContext`` class adds parameters via ``kwargs``
-    and ``parameters`` properties, but these are not part of this protocol.
+    The concrete ``WorkflowContext`` class adds validated parameters via the
+    ``kwargs`` property.
     """
+
+    @property
+    def kwargs(self) -> Any:
+        """Validated workflow parameters (pydantic model or ``None``)."""
+        ...
 
     @property
     def storage(self) -> StorageBackend:
@@ -50,8 +55,21 @@ class WorkflowContext(Protocol):
         """Save raw bytes to a file."""
         ...
 
-    def save_json(self, filename: str, data: Any) -> None:
-        """Save data as JSON."""
+    def save_json(
+        self, filename: str, data: Any, allow_protected: bool = False
+    ) -> None:
+        """Save data as JSON.
+
+        Parameters
+        ----------
+        filename : str
+            The filename to save to.
+        data : Any
+            The data to serialise.
+        allow_protected : bool, optional
+            If True, allow writing protected files like ``context.json``.
+            Default is False.
+        """
         ...
 
     def save_xarray(self, filename: str, dataset: xr.Dataset) -> None:
@@ -79,6 +97,9 @@ class WorkflowContext(Protocol):
         ...
 
     # ── Dependency access ───────────────────────────────────────────────
+    def has_dependency(self, key: str) -> bool:
+        """Check if a dependency is available."""
+        ...
 
     def dependency(self, key: str) -> WorkflowContext:
         """Get a context for accessing a completed dependency's outputs."""

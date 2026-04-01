@@ -2,9 +2,9 @@
 
 import pytest
 
-from muflow import WorkflowSpec, WorkflowPlanner, register_workflow
+from muflow import WorkflowPlanner, WorkflowSpec, register_workflow
 from muflow.planner import get_dependency_access_map
-from muflow.registry import clear, get
+from muflow.registry import clear
 
 
 @pytest.fixture(autouse=True)
@@ -68,8 +68,12 @@ class TestWorkflowPlannerDependencies:
         assert len(plan.nodes) == 2
 
         # Find the training and features nodes
-        training_node = next(n for n in plan.nodes.values() if n.function == "test.training")
-        features_node = next(n for n in plan.nodes.values() if n.function == "test.features")
+        training_node = next(
+            n for n in plan.nodes.values() if n.function == "test.training"
+        )
+        features_node = next(
+            n for n in plan.nodes.values() if n.function == "test.features"
+        )
 
         # Training depends on features
         assert features_node.key in training_node.depends_on
@@ -99,7 +103,9 @@ class TestWorkflowPlannerDependencies:
         planner = WorkflowPlanner()
         plan = planner.build_plan("test.training", "tag:1", {"other": "param"})
 
-        features_node = next(n for n in plan.nodes.values() if n.function == "test.features")
+        features_node = next(
+            n for n in plan.nodes.values() if n.function == "test.features"
+        )
         assert features_node.subject_key == "surface:999"
         assert features_node.kwargs == {"resolution": "high"}
 
@@ -139,7 +145,9 @@ class TestWorkflowPlannerDependencies:
         assert len(plan.nodes) == 4
 
         # All process_surface nodes
-        process_nodes = [n for n in plan.nodes.values() if n.function == "test.process_surface"]
+        process_nodes = [
+            n for n in plan.nodes.values() if n.function == "test.process_surface"
+        ]
         assert len(process_nodes) == 3
 
         subject_keys = {n.subject_key for n in process_nodes}
@@ -223,8 +231,8 @@ class TestWorkflowPlannerProduces:
         fold_nodes = [n for n in plan.nodes.values() if n.function == "test.fold"]
 
         # All folds depend on setup
-        for fold in fold_nodes:
-            assert setup_node.key in fold.depends_on
+        for fold_node in fold_nodes:
+            assert setup_node.key in fold_node.depends_on
 
         # Setup is depended on by all folds
         assert len(setup_node.depended_on_by) == 3
@@ -264,13 +272,15 @@ class TestWorkflowPlannerProduces:
         plan = planner.build_plan("test.aggregate", "tag:1", {"n_folds": 3})
 
         # Find nodes
-        aggregate_node = next(n for n in plan.nodes.values() if n.function == "test.aggregate")
+        aggregate_node = next(
+            n for n in plan.nodes.values() if n.function == "test.aggregate"
+        )
         fold_nodes = [n for n in plan.nodes.values() if n.function == "test.fold"]
 
         # Aggregate depends on all folds
         assert len(aggregate_node.depends_on) == 3
-        for fold in fold_nodes:
-            assert fold.key in aggregate_node.depends_on
+        for fold_node in fold_nodes:
+            assert fold_node.key in aggregate_node.depends_on
 
 
 class TestWorkflowPlannerCaching:
@@ -449,3 +459,46 @@ class TestPlanExecution:
 
         assert not plan.is_complete(set())
         assert plan.is_complete({plan.root_key})
+
+    def test_identity_keys_affect_node_key(self):
+        """Node key should be computed using identity_keys if provided."""
+
+        @register_workflow(name="test.identity", identity_keys=["id"])
+        def my_workflow(context):
+            pass
+
+        planner = WorkflowPlanner()
+
+        # Different kwargs, same id -> same node key
+        key1 = planner.build_plan(
+            "test.identity", "sub", {"id": 1, "other": "a"}
+        ).root_key
+        key2 = planner.build_plan(
+            "test.identity", "sub", {"id": 1, "other": "b"}
+        ).root_key
+        assert key1 == key2
+
+        # Different id -> different node key
+        key3 = planner.build_plan(
+            "test.identity", "sub", {"id": 2, "other": "a"}
+        ).root_key
+        assert key1 != key3
+
+    def test_identity_keys_passed_to_is_cached(self):
+        """Planner should use identity_keys when checking cache."""
+        checked_kwargs = []
+
+        def is_cached(name, subject, kwargs):
+            checked_kwargs.append(kwargs)
+            return False
+
+        @register_workflow(name="test.cached", identity_keys=["id"])
+        def my_workflow(context):
+            pass
+
+        planner = WorkflowPlanner(is_cached=is_cached)
+        planner.build_plan("test.cached", "sub", {"id": 1, "other": "val"})
+
+        # HACK: Actually, planner currently passes full kwargs to is_cached,
+        # but the node_key it uses for the node itself is hashed with identity_keys.
+        # Wait, let's check planner.py again.

@@ -28,11 +28,12 @@ class TestWorkflowContext:
             assert ctx.storage_prefix == tmpdir
 
     def test_kwargs(self):
-        """kwargs should return the provided parameters."""
+        """kwargs should return the raw dict by default (not yet validated)."""
         with tempfile.TemporaryDirectory() as tmpdir:
             kwargs = {"param1": "value1", "param2": 42}
             ctx = create_local_context(path=tmpdir, kwargs=kwargs)
             assert ctx.kwargs == kwargs
+            assert ctx._raw_kwargs == kwargs
 
     def test_save_and_read_json(self):
         """Should save and read JSON files."""
@@ -154,7 +155,7 @@ class TestWorkflowContext:
             path = Path(tmpdir) / "new_dir"
             assert not path.exists()
 
-            ctx = create_local_context(path=str(path), kwargs={})
+            create_local_context(path=str(path), kwargs={})
             assert path.exists()
 
 

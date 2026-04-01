@@ -40,9 +40,12 @@ class LocalStorageBackend:
         hash_dict: dict = None,
         base_prefix: str = "muflow",
         allowed_outputs: set[str] = None,
+        identity_keys: list[str] = None,
     ):
         if hash_dict is not None:
-            self._path = Path(path) / compute_prefix(hash_dict, base_prefix)
+            self._path = Path(path) / compute_prefix(
+                hash_dict, base_prefix, identity_keys
+            )
         else:
             self._path = Path(path)
         self._path.mkdir(parents=True, exist_ok=True)
@@ -79,8 +82,15 @@ class LocalStorageBackend:
         bool
             True if a manifest.json exists at the computed storage prefix.
         """
+        from muflow.registry import get as get_entry
+
+        entry = get_entry(workflow_name)
+        identity_keys = entry.identity_keys if entry else None
+
         hash_dict = {"workflow": workflow_name, "subject": subject_key, **kwargs}
-        prefix = compute_prefix(hash_dict, base_prefix=str(base_path))
+        prefix = compute_prefix(
+            hash_dict, base_prefix=str(base_path), identity_keys=identity_keys
+        )
         return (Path(prefix) / "manifest.json").exists()
 
     @classmethod
@@ -157,9 +167,13 @@ class LocalStorageBackend:
         path.write_bytes(data)
         self._written_files.add(filename)
 
-    def save_json(self, filename: str, data: Any) -> None:
+    def save_json(
+        self, filename: str, data: Any, allow_protected: bool = False
+    ) -> None:
         validate_filename(filename)
-        validate_writable(filename, self._written_files)
+        validate_writable(
+            filename, self._written_files, allow_protected=allow_protected
+        )
         self._validate_allowed(filename)
         path = self._full_path(filename)
         path.parent.mkdir(parents=True, exist_ok=True)
