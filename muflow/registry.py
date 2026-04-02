@@ -22,7 +22,7 @@ Function-based registration
 
 Class-based registration (legacy)
 ---------------------------------
->>> from muflow import WorkflowImplementation
+>>> from topobank.analysis.workflows import WorkflowImplementation
 >>> from muflow.registry import register
 >>>
 >>> @register
@@ -42,6 +42,12 @@ from typing import Callable, Dict, List, Optional, Type, Union
 import pydantic
 
 # ── WorkflowEntry ──────────────────────────────────────────────────────────
+
+
+@dataclass
+class IdentityKey:
+    """Marker for Pydantic model fields that define the workflow's identity."""
+    pass
 
 
 @dataclass
@@ -153,23 +159,39 @@ def register_workflow(
         Class with ``files`` dict for output validation.
     identity_keys : list[str], optional
         List of keys in kwargs that define the workflow's identity for hashing.
+        If not provided, fields in the ``parameters`` model annotated with
+        ``IdentityKey`` are used. If neither is provided, all kwargs are used.
 
     Example
     -------
-    >>> @register_workflow(
-    ...     name="myapp.analyse",
-    ...     display_name="Analyse",
-    ...     dependencies={"features": "myapp.features"},
-    ...     parameters=MyParams,
-    ...     outputs=MyOutputs,
-    ...     identity_keys=["id", "version"],
-    ... )
-    ... def analyse(context):
-    ...     features = context.dependency("features").read_json("result.json")
-    ...     ...
+    >>> from typing import Annotated
+    >>> import pydantic
+    >>> from muflow import register_workflow, IdentityKey
+    >>>
+    >>> class MyParams(pydantic.BaseModel):
+    ...     id: Annotated[str, IdentityKey()]
+    ...     other: str
+    >>>
+    >>> @register_workflow("myapp.greet", parameters=MyParams)
+    ... def greet(context):
+    ...     pass
     """
 
     def decorator(fn: Callable) -> Callable:
+        # Extract identity keys from parameters if not explicitly provided
+        final_identity_keys = identity_keys
+        if final_identity_keys is None and parameters is not None:
+            final_identity_keys = []
+            for field_name, field_info in parameters.model_fields.items():
+                # Check for IdentityKey in Annotated metadata
+                for metadata in getattr(field_info, "metadata", []):
+                    if isinstance(metadata, IdentityKey):
+                        final_identity_keys.append(field_name)
+                        break
+
+            if not final_identity_keys:
+                final_identity_keys = None
+
         entry = WorkflowEntry(
             name=name,
             fn=fn,
@@ -179,7 +201,7 @@ def register_workflow(
             produces=produces or {},
             parameters=parameters,
             outputs=outputs,
-            identity_keys=identity_keys,
+            identity_keys=final_identity_keys,
         )
         _register_entry(entry)
         return fn

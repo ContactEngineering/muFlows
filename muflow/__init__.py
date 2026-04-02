@@ -70,7 +70,7 @@ from muflow.plan import WorkflowNode, WorkflowPlan
 
 # Planner
 from muflow.planner import WorkflowPlanner, get_dependency_access_map
-from muflow.registry import WorkflowEntry, register_workflow
+from muflow.registry import IdentityKey, WorkflowEntry, register_workflow
 
 # Storage backends
 from muflow.storage import (
@@ -118,6 +118,7 @@ __all__ = [
     "get_outputs_schema",
     # Registry
     "registry",
+    "IdentityKey",
     "WorkflowEntry",
     "register_workflow",
     # Executor

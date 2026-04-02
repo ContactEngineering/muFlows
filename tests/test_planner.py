@@ -502,3 +502,112 @@ class TestPlanExecution:
         # HACK: Actually, planner currently passes full kwargs to is_cached,
         # but the node_key it uses for the node itself is hashed with identity_keys.
         # Wait, let's check planner.py again.
+
+
+class TestWorkflowPlannerIdentityAnnotations:
+    """Tests for identity keys defined via Pydantic annotations."""
+
+    def test_identity_key_annotation(self):
+        """Should extract identity keys from Pydantic model annotations."""
+        from typing import Annotated
+
+        import pydantic
+
+        from muflow import IdentityKey
+
+        class AnnotatedParams(pydantic.BaseModel):
+            id: Annotated[int, IdentityKey()]
+            other: str
+
+        @register_workflow(name="test.annotated", parameters=AnnotatedParams)
+        def my_workflow(context):
+            pass
+
+        planner = WorkflowPlanner()
+
+        # Different kwargs, same id -> same node key
+        plan1 = planner.build_plan(
+            "test.annotated", "sub", {"id": 1, "other": "a"}
+        )
+        plan2 = planner.build_plan(
+            "test.annotated", "sub", {"id": 1, "other": "b"}
+        )
+        assert plan1.root_key == plan2.root_key
+
+        # Different id -> different node key
+        plan3 = planner.build_plan(
+            "test.annotated", "sub", {"id": 2, "other": "a"}
+        )
+        assert plan1.root_key != plan3.root_key
+
+    def test_multiple_identity_key_annotations(self):
+        """Should handle multiple fields annotated with IdentityKey."""
+        from typing import Annotated
+
+        import pydantic
+
+        from muflow import IdentityKey
+
+        class MultiAnnotatedParams(pydantic.BaseModel):
+            id1: Annotated[int, IdentityKey()]
+            id2: Annotated[int, IdentityKey()]
+            other: str
+
+        @register_workflow(name="test.multi_annotated", parameters=MultiAnnotatedParams)
+        def my_workflow(context):
+            pass
+
+        planner = WorkflowPlanner()
+
+        # Same id1, id2 -> same node key
+        key1 = planner.build_plan(
+            "test.multi_annotated", "sub", {"id1": 1, "id2": 1, "other": "a"}
+        ).root_key
+        key2 = planner.build_plan(
+            "test.multi_annotated", "sub", {"id1": 1, "id2": 1, "other": "b"}
+        ).root_key
+        assert key1 == key2
+
+        # Different id1 or id2 -> different node key
+        key3 = planner.build_plan(
+            "test.multi_annotated", "sub", {"id1": 1, "id2": 2, "other": "a"}
+        ).root_key
+        assert key1 != key3
+
+    def test_explicit_identity_keys_override_annotations(self):
+        """Explicit identity_keys argument should override annotations."""
+        from typing import Annotated
+
+        import pydantic
+
+        from muflow import IdentityKey
+
+        class AnnotatedParams(pydantic.BaseModel):
+            id: Annotated[int, IdentityKey()]
+            other: str
+
+        # Override: only 'other' is an identity key
+        @register_workflow(
+            name="test.override",
+            parameters=AnnotatedParams,
+            identity_keys=["other"]
+        )
+        def my_workflow(context):
+            pass
+
+        planner = WorkflowPlanner()
+
+        # Different id, same other -> same node key
+        key1 = planner.build_plan(
+            "test.override", "sub", {"id": 1, "other": "a"}
+        ).root_key
+        key2 = planner.build_plan(
+            "test.override", "sub", {"id": 2, "other": "a"}
+        ).root_key
+        assert key1 == key2
+
+        # Same id, different other -> different node key
+        key3 = planner.build_plan(
+            "test.override", "sub", {"id": 1, "other": "b"}
+        ).root_key
+        assert key1 != key3
