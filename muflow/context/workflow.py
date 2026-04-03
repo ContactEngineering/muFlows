@@ -66,10 +66,9 @@ class WorkflowContext:
         progress_reporter: Optional[Callable[[int, int, str], None]] = None,
     ):
         self._storage = storage
-        self._raw_kwargs = kwargs
         self._dependency_storages = dependency_storages or {}
         self._progress_reporter = progress_reporter or _print_progress
-        self._kwargs = kwargs  # Set by executor for function-based workflows
+        self._kwargs = kwargs
 
     # ── Parameters ──────────────────────────────────────────────────────
 

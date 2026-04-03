@@ -287,51 +287,6 @@ class WorkflowPlanner:
                 nodes[prod_node_key].depends_on.append(node.key)
                 _log.debug(f"  {node.function} produces {spec.workflow} ({prod_key})")
 
-    def _compute_dependency_keys(
-        self,
-        node: WorkflowNode,
-        entry: WorkflowEntry,
-    ) -> Dict[str, str]:
-        """Compute the mapping from dependency access keys to node keys.
-
-        This mapping allows workflows to access dependencies by their
-        declared key (e.g., "surface_0") rather than the full node key.
-
-        Parameters
-        ----------
-        node : WorkflowNode
-            The workflow node.
-        entry : WorkflowEntry
-            The workflow entry with dependency declarations.
-
-        Returns
-        -------
-        dict[str, str]
-            Mapping from access key to node key.
-        """
-        dep_specs = enumerate_specs(entry.dependencies, node.subject_key, node.kwargs)
-
-        result = {}
-        for access_key, spec in dep_specs.items():
-            # Compute the node key for this dependency
-            hash_dict = {
-                "workflow": spec.workflow,
-                "subject": spec.subject_key,
-                **spec.kwargs,
-            }
-            # Look up dependency's entry to get its identity_keys
-            dep_entry = get_entry(spec.workflow)
-            dep_identity_keys = dep_entry.identity_keys if dep_entry else None
-            dep_node_key = compute_prefix(
-                hash_dict,
-                base_prefix=self._base_prefix,
-                identity_keys=dep_identity_keys,
-            )
-            result[access_key] = dep_node_key
-
-        return result
-
-
 def get_dependency_access_map(
     plan: WorkflowPlan,
     node_key: str,
@@ -359,8 +314,6 @@ def get_dependency_access_map(
     Note
     ----
     This function re-enumerates dependencies to recover the access keys.
-    The plan's ``get_dependency_prefixes`` method returns node keys as keys,
-    but workflows access dependencies by their declared access key.
     """
     node = plan.nodes[node_key]
     entry = get_entry(node.function)
@@ -372,13 +325,16 @@ def get_dependency_access_map(
 
     result = {}
     for access_key, spec in dep_specs.items():
-        # Compute the storage prefix for this dependency
         hash_dict = {
             "workflow": spec.workflow,
             "subject": spec.subject_key,
             **spec.kwargs,
         }
-        storage_prefix = compute_prefix(hash_dict, base_prefix=base_prefix)
+        dep_entry = get_entry(spec.workflow)
+        dep_identity_keys = dep_entry.identity_keys if dep_entry else None
+        storage_prefix = compute_prefix(
+            hash_dict, base_prefix=base_prefix, identity_keys=dep_identity_keys
+        )
         result[access_key] = storage_prefix
 
     return result

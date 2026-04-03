@@ -80,12 +80,6 @@ from muflow.storage import (
     compute_prefix,
 )
 
-# Lambda backend factory (requires boto3)
-try:
-    from muflow.backends.lambda_backend import create_lambda_handler  # noqa: F401
-except ImportError:
-    pass
-
 # I/O utilities
 from muflow.io import (
     ExtendedJSONEncoder,
@@ -154,25 +148,28 @@ __all__ = [
 
 # Optional: LambdaBackend (requires boto3)
 try:
-    from muflow.backends import LambdaBackend  # noqa: F401
+    from muflow.backends import LambdaBackend, create_lambda_handler  # noqa: F401
     __all__.extend(["LambdaBackend", "create_lambda_handler"])
 except ImportError:
     pass
 
+# Completion callbacks (always available)
+from muflow.backends.callbacks import (  # noqa: F401
+    CeleryCompletionCallback,
+    CompletionCallback,
+    LoggingCompletionCallback,
+    NoOpCompletionCallback,
+)
+__all__.extend([
+    "CompletionCallback",
+    "CeleryCompletionCallback",
+    "NoOpCompletionCallback",
+    "LoggingCompletionCallback",
+])
+
 # Optional: CeleryBackend (requires celery)
 try:
     from muflow.backends import CeleryBackend, create_celery_task  # noqa: F401
-    from muflow.backends.callbacks import (  # noqa: F401
-        CeleryCompletionCallback,
-        CompletionCallback,
-        NoOpCompletionCallback,
-    )
-    __all__.extend([
-        "CeleryBackend",
-        "create_celery_task",
-        "CompletionCallback",
-        "CeleryCompletionCallback",
-        "NoOpCompletionCallback",
-    ])
+    __all__.extend(["CeleryBackend", "create_celery_task"])
 except ImportError:
     pass

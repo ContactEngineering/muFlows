@@ -134,7 +134,6 @@ def register_workflow(
     produces: Union[dict, Callable] = None,
     parameters: Optional[Type[pydantic.BaseModel]] = None,
     outputs: Optional[Type] = None,
-    identity_keys: Optional[List[str]] = None,
 ) -> Callable:
     """Decorator that registers a function as a workflow.
 
@@ -157,10 +156,6 @@ def register_workflow(
         Pydantic model for parameter validation.
     outputs : type, optional
         Class with ``files`` dict for output validation.
-    identity_keys : list[str], optional
-        List of keys in kwargs that define the workflow's identity for hashing.
-        If not provided, fields in the ``parameters`` model annotated with
-        ``IdentityKey`` are used. If neither is provided, all kwargs are used.
 
     Example
     -------
@@ -178,17 +173,15 @@ def register_workflow(
     """
 
     def decorator(fn: Callable) -> Callable:
-        # Extract identity keys from parameters if not explicitly provided
-        final_identity_keys = identity_keys
-        if final_identity_keys is None and parameters is not None:
+        # Extract identity keys from IdentityKey annotations in parameters model
+        final_identity_keys = None
+        if parameters is not None:
             final_identity_keys = []
             for field_name, field_info in parameters.model_fields.items():
-                # Check for IdentityKey in Annotated metadata
                 for metadata in getattr(field_info, "metadata", []):
                     if isinstance(metadata, IdentityKey):
                         final_identity_keys.append(field_name)
                         break
-
             if not final_identity_keys:
                 final_identity_keys = None
 
@@ -227,6 +220,18 @@ def register(klass: Type) -> Type:
         obj = klass()
         return obj.execute(context)
 
+    parameters = getattr(meta, "parameters", None)
+    legacy_identity_keys = None
+    if parameters is not None:
+        legacy_identity_keys = []
+        for field_name, field_info in parameters.model_fields.items():
+            for metadata in getattr(field_info, "metadata", []):
+                if isinstance(metadata, IdentityKey):
+                    legacy_identity_keys.append(field_name)
+                    break
+        if not legacy_identity_keys:
+            legacy_identity_keys = None
+
     entry = WorkflowEntry(
         name=getattr(meta, "name"),
         fn=wrapper,
@@ -234,9 +239,9 @@ def register(klass: Type) -> Type:
         queue=getattr(meta, "queue", "default"),
         dependencies=getattr(meta, "dependencies", {}),
         produces=getattr(meta, "produces", {}),
-        parameters=getattr(meta, "parameters", None),
+        parameters=parameters,
         outputs=getattr(klass, "Outputs", None),
-        identity_keys=getattr(meta, "identity_keys", None),
+        identity_keys=legacy_identity_keys,
     )
     _register_entry(entry)
     return klass

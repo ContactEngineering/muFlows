@@ -29,19 +29,16 @@ try:
 except ImportError:
     pass
 
-# Callbacks (Celery optional)
-try:
-    from muflow.backends.callbacks import (  # noqa: F401
-        CeleryCompletionCallback,
-        CompletionCallback,
-        LoggingCompletionCallback,
-        NoOpCompletionCallback,
-    )
-    __all__.extend([
-        "CompletionCallback",
-        "CeleryCompletionCallback",
-        "NoOpCompletionCallback",
-        "LoggingCompletionCallback",
-    ])
-except ImportError:
-    pass
+# Callbacks (always available)
+from muflow.backends.callbacks import (  # noqa: F401
+    CeleryCompletionCallback,
+    CompletionCallback,
+    LoggingCompletionCallback,
+    NoOpCompletionCallback,
+)
+__all__.extend([
+    "CompletionCallback",
+    "CeleryCompletionCallback",
+    "NoOpCompletionCallback",
+    "LoggingCompletionCallback",
+])
