@@ -5,11 +5,9 @@ import tempfile
 from datetime import date, datetime
 
 import numpy as np
-import pytest
 import xarray as xr
 
 from muflow.io.json import (
-    ExtendedJSONEncoder,
     dumps_json,
     loads_json,
 )

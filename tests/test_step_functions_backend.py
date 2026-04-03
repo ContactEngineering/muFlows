@@ -5,7 +5,7 @@ import json
 import pytest
 
 from muflow.plan import WorkflowNode, WorkflowPlan
-from muflow.registry import clear, register_workflow
+from muflow.registry import clear
 
 try:
     import boto3
@@ -65,7 +65,8 @@ def _simple_plan() -> WorkflowPlan:
         kwargs={},
         storage_prefix="muflow/test.simple/aaa",
     )
-    return WorkflowPlan(nodes={"muflow/test.simple/aaa": node}, root_key="muflow/test.simple/aaa")
+    key = "muflow/test.simple/aaa"
+    return WorkflowPlan(nodes={key: node}, root_key=key)
 
 
 def _linear_plan() -> WorkflowPlan:
@@ -109,9 +110,9 @@ def _fan_in_plan() -> WorkflowPlan:
         subject_key="sub:all",
         kwargs={},
         storage_prefix="muflow/test.root/rrr",
-        depends_on=[l.key for l in leaves],
+        depends_on=[node.key for node in leaves],
     )
-    nodes = {l.key: l for l in leaves}
+    nodes = {node.key: node for node in leaves}
     nodes[root.key] = root
     return WorkflowPlan(nodes=nodes, root_key=root.key)
 

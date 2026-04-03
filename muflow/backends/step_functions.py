@@ -144,7 +144,11 @@ class StepFunctionsBackend:
             Step Functions execution ARN, or the sentinel
             ``"cached-{root_key}"`` when every node is already cached.
         """
-        if any(cb is not None for cb in (on_node_start, on_node_complete, on_node_failure)):
+        has_callbacks = any(
+            cb is not None
+            for cb in (on_node_start, on_node_complete, on_node_failure)
+        )
+        if has_callbacks:
             _log.warning(
                 "StepFunctionsBackend: node callbacks are not supported "
                 "(execution is fully async).  Use CloudWatch EventBridge "
@@ -159,7 +163,8 @@ class StepFunctionsBackend:
             _log.info(f"Plan {plan.root_key[:24]}...: all nodes cached")
             return f"cached-{plan.root_key}"
 
-        sm_arn = self._ensure_state_machine(self._state_machine_name(plan.root_key), asl)
+        sm_name = self._state_machine_name(plan.root_key)
+        sm_arn = self._ensure_state_machine(sm_name, asl)
 
         execution_name = f"exec-{uuid.uuid4().hex[:24]}"
         resp = self._sfn.start_execution(

@@ -49,12 +49,10 @@ def train_model(context):
 def loo_cv(context):
     """Leave-one-out cross-validation for a single fold."""
     leave_out = context.kwargs["leave_out_index"]
-    train_features, val_features = [], None
+    train_features = []
     for key in context.dependency_keys():
         feat = context.dependency(key).read_json("features.json")
-        if key == f"features:{leave_out}":
-            val_features = feat
-        else:
+        if key != f"features:{leave_out}":
             train_features.append(feat)
     # ... train on train_features, evaluate on val_features ...
     context.save_json("cv_result.json", {
@@ -68,7 +66,7 @@ def loo_cv(context):
 def generate_report(context):
     """Generate report in a single format (pdf/xlsx/csv)."""
     fmt = context.kwargs["format"]
-    model = context.dependency("train").read_json("model.json")
+    context.dependency("train").read_json("model.json")  # ensure train is done
     cv_results = []
     for key in context.dependency_keys():
         if key.startswith("loo_cv:"):

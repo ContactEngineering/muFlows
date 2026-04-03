@@ -125,7 +125,9 @@ __all__ = [
 
 # Optional: StepFunctionsBackend (requires boto3)
 try:
-    from muflow.backends import StepFunctionsBackend, create_lambda_handler  # noqa: F401
+    from muflow.backends import (  # noqa: F401
+        StepFunctionsBackend, create_lambda_handler,
+    )
     __all__.extend(["StepFunctionsBackend", "create_lambda_handler"])
 except ImportError:
     pass
