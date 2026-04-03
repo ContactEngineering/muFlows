@@ -68,8 +68,7 @@ class StepFunctionsBackend:
         IAM role ARN that Step Functions uses to invoke Lambda.
         The role must have ``lambda:InvokeFunction`` permission.
     base_prefix : str
-        S3 key prefix that was passed to ``WorkflowPlanner`` when the plan
-        was built.  Used to recompute dependency storage prefixes.
+        S3 key prefix used when building the plan.
         Default: ``"muflow"``.
     state_machine_prefix : str
         Short string prepended to auto-generated state machine names.
@@ -80,7 +79,6 @@ class StepFunctionsBackend:
 
     Example
     -------
-    >>> from muflow import WorkflowPlanner
     >>> from muflow.backends import StepFunctionsBackend
     >>>
     >>> backend = StepFunctionsBackend(
@@ -88,9 +86,7 @@ class StepFunctionsBackend:
     ...     bucket="my-workflow-bucket",
     ...     role_arn="arn:aws:iam::123456789:role/StepFunctionsLambdaRole",
     ... )
-    >>> plan = WorkflowPlanner(base_prefix="muflow").build_plan(
-    ...     "myapp.analysis", "dataset:42", {"param": "value"}
-    ... )
+    >>> plan = my_pipeline.build_plan("dataset:42", {"param": "value"})
     >>> execution_arn = backend.submit_plan(plan)
     >>> # Returns immediately.  Poll later:
     >>> state = backend.get_plan_state(execution_arn)  # "running" | "success" | …
@@ -148,7 +144,11 @@ class StepFunctionsBackend:
             Step Functions execution ARN, or the sentinel
             ``"cached-{root_key}"`` when every node is already cached.
         """
-        if any(cb is not None for cb in (on_node_start, on_node_complete, on_node_failure)):
+        has_callbacks = any(
+            cb is not None
+            for cb in (on_node_start, on_node_complete, on_node_failure)
+        )
+        if has_callbacks:
             _log.warning(
                 "StepFunctionsBackend: node callbacks are not supported "
                 "(execution is fully async).  Use CloudWatch EventBridge "
@@ -163,7 +163,8 @@ class StepFunctionsBackend:
             _log.info(f"Plan {plan.root_key[:24]}...: all nodes cached")
             return f"cached-{plan.root_key}"
 
-        sm_arn = self._ensure_state_machine(self._state_machine_name(plan.root_key), asl)
+        sm_name = self._state_machine_name(plan.root_key)
+        sm_arn = self._ensure_state_machine(sm_name, asl)
 
         execution_name = f"exec-{uuid.uuid4().hex[:24]}"
         resp = self._sfn.start_execution(
@@ -393,14 +394,10 @@ class StepFunctionsBackend:
         """Build the Lambda event payload for a node.
 
         Dependency prefixes are keyed by their *access keys* (e.g.
-        ``"surface_0"``) so that workflow code can call
-        ``ctx.dependency("surface_0")`` correctly.
+        ``"features:0"``) so that workflow code can call
+        ``ctx.dependency("features:0")`` correctly.
         """
-        from muflow.planner import get_dependency_access_map
-
-        dependency_prefixes = get_dependency_access_map(
-            plan, node.key, base_prefix=self._base_prefix
-        )
+        dependency_prefixes = node.dependency_access_map
         return {
             "workflow_name": node.function,
             "kwargs": node.kwargs,

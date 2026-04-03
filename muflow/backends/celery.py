@@ -50,9 +50,8 @@ class CeleryBackend:
     bucket : str
         S3 bucket for workflow I/O.
     base_prefix : str
-        S3 key prefix that was passed to ``WorkflowPlanner`` when the plan
-        was built.  Used to recompute dependency storage prefixes keyed by
-        their access names.  Default: ``"muflow"``.
+        S3 key prefix used when building the plan.
+        Default: ``"muflow"``.
     task_name : str
         Name of the Celery task for node execution.
         Defaults to "muflow.execute_node".
@@ -60,13 +59,12 @@ class CeleryBackend:
     Example
     -------
     >>> from celery import Celery
-    >>> from muflow import WorkflowPlanner
     >>> from muflow.backends import CeleryBackend
     >>>
     >>> app = Celery("myapp")
     >>> backend = CeleryBackend(app, bucket="my-bucket", base_prefix="muflow")
     >>>
-    >>> plan = WorkflowPlanner(base_prefix="muflow").build_plan(...)
+    >>> plan = my_pipeline.build_plan("tag:1", kwargs, base_prefix="muflow")
     >>> plan_id = backend.submit_plan(plan)
     """
 
@@ -292,12 +290,8 @@ class CeleryBackend:
         celery.canvas.Signature
             Celery task signature.
         """
-        # Build dependency prefixes keyed by access name (e.g. "surface_0"),
-        # not by node key, so workflows can call ctx.dependency("surface_0").
-        from muflow.planner import get_dependency_access_map
-        dependency_prefixes = get_dependency_access_map(
-            plan, node.key, base_prefix=self._base_prefix
-        )
+        # Use pre-computed dependency access map from plan
+        dependency_prefixes = node.dependency_access_map
 
         # Build payload dict
         payload_dict = {

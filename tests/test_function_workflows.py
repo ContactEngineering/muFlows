@@ -52,7 +52,6 @@ class TestRegisterWorkflow:
             name="test.full",
             display_name="Full Test",
             queue="analysis",
-            dependencies={"dep": "other.workflow"},
             parameters=Params,
         )
         def full(context):
@@ -61,7 +60,6 @@ class TestRegisterWorkflow:
         entry = get("test.full")
         assert entry.display_name == "Full Test"
         assert entry.queue == "analysis"
-        assert entry.dependencies == {"dep": "other.workflow"}
         assert entry.parameters is Params
         assert entry.identity_keys == ["threshold"]
 

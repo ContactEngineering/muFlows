@@ -10,10 +10,11 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
     from muflow.plan import WorkflowPlan
+    from muflow.pipeline import Pipeline
 
 _log = logging.getLogger(__name__)
 
@@ -87,28 +88,28 @@ class LocalExecutionResult:
 
 
 def run_plan_locally(
-    workflow_name: str,
+    pipeline: "Pipeline",
     subject_key: str,
     kwargs: dict,
-    output_dir: str | Path,
+    output_dir: Union[str, Path],
     verbose: bool = False,
     use_cache: bool = True,
 ) -> LocalExecutionResult:
-    """Run a workflow with all dependencies computed automatically.
+    """Run a pipeline with all steps computed automatically.
 
     This is a convenience function for testing that:
-    1. Builds a complete execution plan (including all dependencies)
+    1. Builds a complete execution plan from a Pipeline
     2. Executes all nodes using LocalBackend
     3. Returns the result with easy access to outputs
 
     Parameters
     ----------
-    workflow_name : str
-        Name of the workflow (e.g., "sds_workflows.gpr_training").
+    pipeline : Pipeline
+        The pipeline to execute.
     subject_key : str
         Subject identifier (e.g., "tag:123", "dataset:test").
     kwargs : dict
-        Workflow parameters.
+        Pipeline parameters.
     output_dir : str or Path
         Directory for all workflow outputs.
     verbose : bool
@@ -124,23 +125,18 @@ def run_plan_locally(
     Example
     -------
     >>> from muflow.testing import run_plan_locally
+    >>> from muflow.examples.ml_workflow import ml_pipeline
     >>>
     >>> result = run_plan_locally(
-    ...     workflow_name="sds_workflows.gpr_training",
-    ...     subject_key="dataset:test",
-    ...     kwargs={
-    ...         "dataset": {...},
-    ...         "property": "roughness",
-    ...         "features": [{"name": "sdsalgorithms.height"}],
-    ...     },
+    ...     pipeline=ml_pipeline,
+    ...     subject_key="experiment:1",
+    ...     kwargs={"datasets": ["a", "b", "c"]},
     ...     output_dir="/tmp/test_output",
     ... )
     >>>
     >>> if result.success:
-    ...     training_result = result.read_json("training_result.json")
-    ...     print(training_result["name"])
+    ...     print(f"Plan has {len(result.plan.nodes)} nodes")
     """
-    from muflow import WorkflowPlanner
     from muflow.backends import LocalBackend
     from muflow.storage import LocalStorageBackend
 
@@ -149,15 +145,15 @@ def run_plan_locally(
 
     # Build the plan
     if verbose:
-        print(f"Planning {workflow_name}...")
+        print(f"Planning {pipeline.name}...")
 
     base_path = str(output_dir.absolute())
     is_cached = LocalStorageBackend.make_cache_checker(base_path) if use_cache else None
-    planner = WorkflowPlanner(base_prefix=base_path, is_cached=is_cached)
-    plan = planner.build_plan(
-        workflow_name=workflow_name,
+    plan = pipeline.build_plan(
         subject_key=subject_key,
         kwargs=kwargs,
+        is_cached=is_cached,
+        base_prefix=base_path,
     )
 
     if verbose:

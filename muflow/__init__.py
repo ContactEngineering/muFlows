@@ -1,48 +1,27 @@
 """muflow - Backend-agnostic workflow execution engine.
 
 muflow provides abstractions for defining and executing workflows that can
-run on multiple backends (Celery, AWS Lambda, AWS Batch) without modification.
+run on multiple backends (Celery, AWS Lambda, AWS Step Functions) without
+modification.
 
-Core Concepts
--------------
-WorkflowContext
-    Unified context class for workflow file I/O, dependency access, and
-    progress reporting. Works with any StorageBackend (LocalStorageBackend,
-    S3StorageBackend).
-
-StorageBackend
-    Abstract interface for file storage. Implementations include
-    LocalStorageBackend (filesystem) and S3StorageBackend (AWS S3).
-
-WorkflowPlan
-    A static DAG representing the complete execution plan. Built once upfront
-    by the WorkflowPlanner and stored as JSON.
-
-WorkflowPlanner
-    Builds execution DAGs from workflow dependency declarations.
-
-ExecutionBackend
-    Interface for dispatching workflow nodes to different compute backends.
-    Implementations include StepFunctionsBackend and CeleryBackend.
+Workflows are registered as pure computational units via
+``@register_workflow``.  DAG topology is declared separately via
+:class:`Pipeline`, which compiles to a :class:`WorkflowPlan` that any
+backend can execute.
 
 Example
 -------
->>> from muflow import create_local_context
->>> import xarray as xr
+>>> from muflow import register_workflow, Pipeline, Step, ForEach
 >>>
->>> # Create a context for testing
->>> ctx = create_local_context(
-...     path="/tmp/workflow-output",
-...     kwargs={"param1": "value1"},
+>>> @register_workflow(name="ml.train")
+... def train(context):
+...     context.save_json("model.json", {"weights": []})
+>>>
+>>> pipeline = Pipeline(
+...     name="ml.pipeline",
+...     steps={"train": Step(workflow="ml.train")},
 ... )
->>>
->>> # Use the context for I/O
->>> ctx.save_json("result.json", {"accuracy": 0.95})
->>> ctx.save_xarray("model.nc", xr.Dataset({"weights": [1, 2, 3]}))
->>>
->>> # Read back
->>> result = ctx.read_json("result.json")
->>> model = ctx.read_xarray("model.nc")
+>>> plan = pipeline.build_plan("tag:1", {})
 """
 
 __version__ = "0.1.0"
@@ -56,9 +35,6 @@ from muflow.backends import ExecutionBackend, LocalBackend
 # Core context
 from muflow.context import WorkflowContext, create_local_context
 
-# Dependencies
-from muflow.dependencies import WorkflowSpec
-
 # Executor
 from muflow.executor import ExecutionPayload, ExecutionResult, execute_workflow
 
@@ -68,8 +44,10 @@ from muflow.outputs import OutputFile, get_outputs_schema
 # Plan data structures
 from muflow.plan import WorkflowNode, WorkflowPlan
 
-# Planner
-from muflow.planner import WorkflowPlanner, get_dependency_access_map
+# Pipeline
+from muflow.pipeline import ForEach, Pipeline, Step
+
+# Registry
 from muflow.registry import IdentityKey, WorkflowEntry, register_workflow
 
 # Storage backends
@@ -122,11 +100,10 @@ __all__ = [
     # Plan
     "WorkflowNode",
     "WorkflowPlan",
-    # Planner
-    "WorkflowPlanner",
-    "get_dependency_access_map",
-    # Dependencies
-    "WorkflowSpec",
+    # Pipeline
+    "Pipeline",
+    "Step",
+    "ForEach",
     # Backends
     "ExecutionBackend",
     "LocalBackend",
@@ -148,7 +125,9 @@ __all__ = [
 
 # Optional: StepFunctionsBackend (requires boto3)
 try:
-    from muflow.backends import StepFunctionsBackend, create_lambda_handler  # noqa: F401
+    from muflow.backends import (  # noqa: F401
+        StepFunctionsBackend, create_lambda_handler,
+    )
     __all__.extend(["StepFunctionsBackend", "create_lambda_handler"])
 except ImportError:
     pass

@@ -95,7 +95,7 @@ class LocalStorageBackend:
 
     @classmethod
     def make_cache_checker(cls, base_path: Union[str, Path]):
-        """Create a cache checker function for use with WorkflowPlanner.
+        """Create a cache checker function for use with Pipeline.build_plan().
 
         Parameters
         ----------
@@ -105,18 +105,15 @@ class LocalStorageBackend:
         Returns
         -------
         callable
-            Function with signature (workflow_name, subject_key, kwargs) -> bool
-            suitable for passing to WorkflowPlanner's is_cached parameter.
+            Function with signature ``(workflow_name, subject_key, kwargs) -> bool``
+            suitable for passing to ``Pipeline.build_plan(is_cached=...)``.
 
         Example
         -------
-        >>> from muflow import WorkflowPlanner
         >>> from muflow.storage import LocalStorageBackend
         >>>
-        >>> planner = WorkflowPlanner(
-        ...     base_prefix="/tmp/output",
-        ...     is_cached=LocalStorageBackend.make_cache_checker("/tmp/output"),
-        ... )
+        >>> is_cached = LocalStorageBackend.make_cache_checker("/tmp/output")
+        >>> plan = my_pipeline.build_plan("tag:1", {}, is_cached=is_cached)
         """
         base_path = str(base_path)
 

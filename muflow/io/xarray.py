@@ -3,7 +3,6 @@
 import io
 import tempfile
 import os
-from typing import Union
 
 import xarray as xr
 

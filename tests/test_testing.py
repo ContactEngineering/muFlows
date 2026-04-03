@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from muflow import WorkflowSpec, register_workflow, run_plan_locally
+from muflow import register_workflow, run_plan_locally
+from muflow.pipeline import ForEach, Pipeline, Step
 from muflow.registry import get, unregister
 
 
 @pytest.fixture(autouse=True)
 def register_test_workflows():
     """Register test workflows for each test."""
-    # Unregister if already registered (from previous test)
     for name in [
         "test.testing.simple_workflow",
         "test.testing.workflow_with_deps",
@@ -20,18 +20,6 @@ def register_test_workflows():
     ]:
         if get(name) is not None:
             unregister(name)
-
-    def enumerate_simple_deps(subject_key, kwargs):
-        """Enumerate simple workflow dependencies."""
-        num_deps = kwargs.get("num_deps", 2)
-        return {
-            f"dep_{i}": WorkflowSpec(
-                workflow="test.testing.simple_workflow",
-                subject_key=f"{subject_key}:dep_{i}",
-                kwargs={"id": f"dep_{i}"},
-            )
-            for i in range(num_deps)
-        }
 
     @register_workflow(name="test.testing.simple_workflow")
     def simple_workflow(context):
@@ -42,19 +30,14 @@ def register_test_workflows():
             "status": "completed",
         })
 
-    @register_workflow(
-        name="test.testing.workflow_with_deps",
-        dependencies=enumerate_simple_deps,
-    )
+    @register_workflow(name="test.testing.workflow_with_deps")
     def workflow_with_deps(context):
-        """Workflow that depends on simple_workflow instances."""
+        """Workflow that reads from dependencies."""
         dep_results = []
-        for i in range(context.kwargs.get("num_deps", 2)):
-            dep_key = f"dep_{i}"
-            if context.has_dependency(dep_key):
-                dep = context.dependency(dep_key)
-                result = dep.read_json("result.json")
-                dep_results.append(result["id"])
+        for key in context.dependency_keys():
+            dep = context.dependency(key)
+            result = dep.read_json("result.json")
+            dep_results.append(result["id"])
 
         context.save_json("combined.json", {
             "dependencies": dep_results,
@@ -69,6 +52,45 @@ def register_test_workflows():
     yield
 
 
+# ── Pipelines for testing ─────────────────────────────────────────────────
+
+def _simple_pipeline():
+    return Pipeline(
+        name="test.simple_pipeline",
+        steps={
+            "simple": Step(workflow="test.testing.simple_workflow"),
+        },
+    )
+
+
+def _pipeline_with_deps():
+    return Pipeline(
+        name="test.deps_pipeline",
+        steps={
+            "deps": ForEach(
+                workflow="test.testing.simple_workflow",
+                over=lambda sk, kw: [
+                    {"id": f"dep_{i}"}
+                    for i in range(kw.get("num_deps", 2))
+                ],
+            ),
+            "main": Step(
+                workflow="test.testing.workflow_with_deps",
+                after=["deps"],
+            ),
+        },
+    )
+
+
+def _failing_pipeline():
+    return Pipeline(
+        name="test.failing_pipeline",
+        steps={
+            "fail": Step(workflow="test.testing.failing_workflow"),
+        },
+    )
+
+
 class TestRunPlanLocally:
     """Tests for run_plan_locally function."""
 
@@ -76,7 +98,7 @@ class TestRunPlanLocally:
         """Should execute a simple workflow and return result."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
-                workflow_name="test.testing.simple_workflow",
+                pipeline=_simple_pipeline(),
                 subject_key="test:1",
                 kwargs={"id": "test_node"},
                 output_dir=tmpdir,
@@ -91,7 +113,7 @@ class TestRunPlanLocally:
         """Should be able to read JSON output from result."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
-                workflow_name="test.testing.simple_workflow",
+                pipeline=_simple_pipeline(),
                 subject_key="test:1",
                 kwargs={"id": "my_test_id"},
                 output_dir=tmpdir,
@@ -106,7 +128,7 @@ class TestRunPlanLocally:
         """Should list files in output directory."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
-                workflow_name="test.testing.simple_workflow",
+                pipeline=_simple_pipeline(),
                 subject_key="test:1",
                 kwargs={"id": "test"},
                 output_dir=tmpdir,
@@ -119,14 +141,14 @@ class TestRunPlanLocally:
         """Should execute workflow with dependencies."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
-                workflow_name="test.testing.workflow_with_deps",
+                pipeline=_pipeline_with_deps(),
                 subject_key="test:root",
                 kwargs={"num_deps": 3},
                 output_dir=tmpdir,
             )
 
             assert result.success
-            assert len(result.plan.nodes) == 4  # 1 root + 3 deps
+            assert len(result.plan.nodes) == 4  # 3 deps + 1 main
 
             data = result.read_json("combined.json")
             assert data["status"] == "completed"
@@ -136,7 +158,7 @@ class TestRunPlanLocally:
         """Should handle workflow failure gracefully."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
-                workflow_name="test.testing.failing_workflow",
+                pipeline=_failing_pipeline(),
                 subject_key="test:1",
                 kwargs={},
                 output_dir=tmpdir,
@@ -150,7 +172,7 @@ class TestRunPlanLocally:
         """Should print progress in verbose mode."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
-                workflow_name="test.testing.simple_workflow",
+                pipeline=_simple_pipeline(),
                 subject_key="test:1",
                 kwargs={"id": "test"},
                 output_dir=tmpdir,
@@ -166,7 +188,7 @@ class TestRunPlanLocally:
         """Should be able to read file as bytes."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
-                workflow_name="test.testing.simple_workflow",
+                pipeline=_simple_pipeline(),
                 subject_key="test:1",
                 kwargs={"id": "test"},
                 output_dir=tmpdir,

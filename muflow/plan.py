@@ -38,6 +38,10 @@ class WorkflowNode(pydantic.BaseModel):
         True if results already exist at storage_prefix.
     analysis_id : int, optional
         Database ID of the WorkflowResult (set after DB record creation).
+    dependency_access_map : dict[str, str]
+        Mapping from access key (e.g., ``"features:0"``) to storage prefix.
+        Populated at plan-build time by the Pipeline or WorkflowPlanner.
+        Used by backends to set up ``WorkflowContext`` with dependency storages.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid")
@@ -52,6 +56,7 @@ class WorkflowNode(pydantic.BaseModel):
     output_files: list[str] = []
     cached: bool = False
     analysis_id: Optional[int] = None
+    dependency_access_map: dict[str, str] = {}
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""

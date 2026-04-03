@@ -8,6 +8,21 @@ from typing import Any
 import numpy as np
 
 
+def _encode_special_float(value: float) -> str | None:
+    """Return a string sentinel for NaN/Inf floats, or None."""
+    if math.isnan(value):
+        return "NaN"
+    if math.isinf(value):
+        return "Infinity" if value > 0 else "-Infinity"
+    return None
+
+
+def _encode_np_floating(value: np.floating) -> Any:
+    """Convert a numpy float to a Python object."""
+    sentinel = _encode_special_float(float(value))
+    return sentinel if sentinel is not None else float(value)
+
+
 class ExtendedJSONEncoder(json.JSONEncoder):
     """JSON encoder that handles NaN, Infinity, numpy types, and dates.
 
@@ -21,35 +36,27 @@ class ExtendedJSONEncoder(json.JSONEncoder):
 
     def default(self, obj: Any) -> Any:
         if isinstance(obj, float):
-            if math.isnan(obj):
-                return "NaN"
-            elif math.isinf(obj):
-                return "Infinity" if obj > 0 else "-Infinity"
+            sentinel = _encode_special_float(obj)
+            if sentinel is not None:
+                return sentinel
         elif isinstance(obj, np.ndarray):
             return obj.tolist()
         elif isinstance(obj, np.integer):
             return int(obj)
         elif isinstance(obj, np.floating):
-            if np.isnan(obj):
-                return "NaN"
-            elif np.isinf(obj):
-                return "Infinity" if obj > 0 else "-Infinity"
-            return float(obj)
+            return _encode_np_floating(obj)
         elif isinstance(obj, np.bool_):
             return bool(obj)
-        elif isinstance(obj, datetime):
-            return obj.isoformat()
-        elif isinstance(obj, date):
+        elif isinstance(obj, (datetime, date)):
             return obj.isoformat()
         return super().default(obj)
 
     def encode(self, obj: Any) -> str:
         # Handle top-level floats
         if isinstance(obj, float):
-            if math.isnan(obj):
-                return '"NaN"'
-            elif math.isinf(obj):
-                return '"Infinity"' if obj > 0 else '"-Infinity"'
+            sentinel = _encode_special_float(obj)
+            if sentinel is not None:
+                return json.dumps(sentinel)
         return super().encode(obj)
 
     def iterencode(self, obj: Any, _one_shot: bool = False):
@@ -60,24 +67,18 @@ class ExtendedJSONEncoder(json.JSONEncoder):
         """Recursively convert special float values."""
         if isinstance(obj, dict):
             return {k: self._convert_floats(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
+        if isinstance(obj, list):
             return [self._convert_floats(item) for item in obj]
-        elif isinstance(obj, float):
-            if math.isnan(obj):
-                return "NaN"
-            elif math.isinf(obj):
-                return "Infinity" if obj > 0 else "-Infinity"
-        elif isinstance(obj, np.floating):
-            if np.isnan(obj):
-                return "NaN"
-            elif np.isinf(obj):
-                return "Infinity" if obj > 0 else "-Infinity"
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
+        if isinstance(obj, float):
+            sentinel = _encode_special_float(obj)
+            return sentinel if sentinel is not None else obj
+        if isinstance(obj, np.floating):
+            return _encode_np_floating(obj)
+        if isinstance(obj, np.ndarray):
             return self._convert_floats(obj.tolist())
-        elif isinstance(obj, np.integer):
+        if isinstance(obj, np.integer):
             return int(obj)
-        elif isinstance(obj, np.bool_):
+        if isinstance(obj, np.bool_):
             return bool(obj)
         return obj
 

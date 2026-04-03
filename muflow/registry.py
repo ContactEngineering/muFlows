@@ -1,11 +1,10 @@
 """Workflow registry.
 
-Workflows can be registered as plain functions (preferred) or as
-``WorkflowImplementation`` subclasses (legacy).  Both are stored as
-``WorkflowEntry`` objects.
+Workflows are registered as plain functions using ``@register_workflow``.
+DAG topology is declared separately via :class:`~muflow.pipeline.Pipeline`.
 
-Function-based registration
----------------------------
+Example
+-------
 >>> from muflow.registry import register_workflow
 >>> import pydantic
 >>>
@@ -19,25 +18,12 @@ Function-based registration
 ... )
 ... def my_workflow(context):
 ...     return {"result": "done"}
-
-Class-based registration (legacy)
----------------------------------
->>> from topobank.analysis.workflows import WorkflowImplementation
->>> from muflow.registry import register
->>>
->>> @register
-... class MyWorkflow(WorkflowImplementation):
-...     class Meta:
-...         name = "myapp.my_workflow"
-...         display_name = "My Workflow"
-...     def execute(self, context):
-...         return {"result": "done"}
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Type, Union
+from dataclasses import dataclass
+from typing import Callable, Dict, List, Optional, Type
 
 import pydantic
 
@@ -57,20 +43,13 @@ class WorkflowEntry:
     Attributes
     ----------
     name : str
-        Unique identifier (e.g. ``"topobank_statistics.autocorrelation"``).
+        Unique identifier (e.g. ``"myapp.compute_features"``).
     fn : Callable
         The workflow function.  Signature: ``fn(context) -> dict | None``.
     display_name : str
         Human-readable name shown in UIs.
     queue : str
         Queue name for backend routing.
-    dependencies : dict | callable | None
-        Upstream workflows that must complete before this one.
-        Can be a dict mapping access keys to workflow names/specs,
-        or a callable that enumerates dependencies at plan time.
-    produces : dict | callable | None
-        Downstream workflows spawned after this one completes (fan-out).
-        Same format as dependencies.
     parameters : type[pydantic.BaseModel] | None
         Pydantic model for parameter validation.  ``None`` means no
         parameters.
@@ -86,8 +65,6 @@ class WorkflowEntry:
     fn: Callable
     display_name: str = ""
     queue: str = "default"
-    dependencies: Union[dict, Callable, None] = field(default_factory=dict)
-    produces: Union[dict, Callable, None] = field(default_factory=dict)
     parameters: Optional[Type[pydantic.BaseModel]] = None
     outputs: Optional[Type] = None
     identity_keys: Optional[List[str]] = None
@@ -122,7 +99,7 @@ class NotRegisteredException(RegistryError):
         super().__init__(f"No workflow registered with name '{name}'.")
 
 
-# ── Function-based registration (preferred) ────────────────────────────────
+# ── Function-based registration ───────────────────────────────────────────
 
 
 def register_workflow(
@@ -130,12 +107,14 @@ def register_workflow(
     *,
     display_name: str = "",
     queue: str = "default",
-    dependencies: Union[dict, Callable] = None,
-    produces: Union[dict, Callable] = None,
     parameters: Optional[Type[pydantic.BaseModel]] = None,
     outputs: Optional[Type] = None,
 ) -> Callable:
     """Decorator that registers a function as a workflow.
+
+    Workflows are pure computational units with no knowledge of DAG
+    topology.  Use :class:`~muflow.pipeline.Pipeline` to compose
+    workflows into multi-step DAGs.
 
     Parameters
     ----------
@@ -145,13 +124,6 @@ def register_workflow(
         Human-readable name for UIs.
     queue : str, optional
         Queue name for backend routing. Default: "default".
-    dependencies : dict or callable, optional
-        Upstream workflows that must complete before this one.
-        Can be a dict mapping access keys to workflow names/specs,
-        or a callable ``(subject_key, kwargs) -> Dict[str, WorkflowSpec]``.
-    produces : dict or callable, optional
-        Downstream workflows spawned after this one completes (fan-out).
-        Same format as dependencies.
     parameters : type[pydantic.BaseModel], optional
         Pydantic model for parameter validation.
     outputs : type, optional
@@ -190,8 +162,6 @@ def register_workflow(
             fn=fn,
             display_name=display_name,
             queue=queue,
-            dependencies=dependencies or {},
-            produces=produces or {},
             parameters=parameters,
             outputs=outputs,
             identity_keys=final_identity_keys,
@@ -200,51 +170,6 @@ def register_workflow(
         return fn
 
     return decorator
-
-
-# ── Legacy registration (class-based) ──────────────────────────────────
-
-
-def register(klass: Type) -> Type:
-    """Decorator for class-based workflow registration (legacy).
-
-    Used for ``WorkflowImplementation`` subclasses.
-    """
-    # Create an entry from the class Meta
-    meta = getattr(klass, "Meta", None)
-    if meta is None:
-        raise RegistryError(f"Class {klass.__name__} must have a Meta inner class.")
-
-    # Create the function wrapper for the class-based execute()
-    def wrapper(context):
-        obj = klass()
-        return obj.execute(context)
-
-    parameters = getattr(meta, "parameters", None)
-    legacy_identity_keys = None
-    if parameters is not None:
-        legacy_identity_keys = []
-        for field_name, field_info in parameters.model_fields.items():
-            for metadata in getattr(field_info, "metadata", []):
-                if isinstance(metadata, IdentityKey):
-                    legacy_identity_keys.append(field_name)
-                    break
-        if not legacy_identity_keys:
-            legacy_identity_keys = None
-
-    entry = WorkflowEntry(
-        name=getattr(meta, "name"),
-        fn=wrapper,
-        display_name=getattr(meta, "display_name", ""),
-        queue=getattr(meta, "queue", "default"),
-        dependencies=getattr(meta, "dependencies", {}),
-        produces=getattr(meta, "produces", {}),
-        parameters=parameters,
-        outputs=getattr(klass, "Outputs", None),
-        identity_keys=legacy_identity_keys,
-    )
-    _register_entry(entry)
-    return klass
 
 
 # ── Internal helpers ───────────────────────────────────────────────────────
@@ -263,56 +188,22 @@ def _register_entry(entry: WorkflowEntry) -> None:
 
 
 def get(name: str) -> Optional[WorkflowEntry]:
-    """Get a registered workflow by name.
-
-    Parameters
-    ----------
-    name : str
-        The workflow name.
-
-    Returns
-    -------
-    WorkflowEntry or None
-        The workflow entry, or None if not found.
-    """
+    """Get a registered workflow by name."""
     return _entries_by_name.get(name)
 
 
 def get_by_display_name(display_name: str) -> Optional[WorkflowEntry]:
-    """Get a registered workflow by display name.
-
-    Parameters
-    ----------
-    display_name : str
-        The workflow display name.
-
-    Returns
-    -------
-    WorkflowEntry or None
-        The workflow entry, or None if not found.
-    """
+    """Get a registered workflow by display name."""
     return _entries_by_display_name.get(display_name)
 
 
 def get_all() -> Dict[str, WorkflowEntry]:
-    """Get all registered workflows.
-
-    Returns
-    -------
-    dict
-        Dictionary mapping workflow names to ``WorkflowEntry`` objects.
-    """
+    """Get all registered workflows."""
     return dict(_entries_by_name)
 
 
 def get_names() -> list:
-    """Get list of all registered workflow names.
-
-    Returns
-    -------
-    list
-        List of workflow names.
-    """
+    """Get list of all registered workflow names."""
     return list(_entries_by_name.keys())
 
 

@@ -7,7 +7,7 @@ import pytest
 import xarray as xr
 
 from muflow.storage import LocalStorageBackend, StorageBackend, compute_prefix
-from muflow.storage.base import PROTECTED_FILES, validate_filename, validate_writable
+from muflow.storage.base import validate_filename, validate_writable
 
 
 # ── validate_filename tests ─────────────────────────────────────────────────
@@ -79,7 +79,7 @@ class TestLocalStorageBackend:
 
     def test_creates_directory(self, tmp_path):
         new_dir = tmp_path / "new" / "nested"
-        backend = LocalStorageBackend(new_dir)
+        LocalStorageBackend(new_dir)
         assert new_dir.exists()
 
     # ── JSON round-trip ─────────────────────────────────────────────────
