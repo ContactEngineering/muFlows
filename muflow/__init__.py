@@ -23,7 +23,7 @@ WorkflowPlanner
 
 ExecutionBackend
     Interface for dispatching workflow nodes to different compute backends.
-    Implementations include LambdaBackend and CeleryBackend.
+    Implementations include StepFunctionsBackend and CeleryBackend.
 
 Example
 -------
@@ -79,12 +79,6 @@ from muflow.storage import (
     StorageBackend,
     compute_prefix,
 )
-
-# Lambda backend factory (requires boto3)
-try:
-    from muflow.backends.lambda_backend import create_lambda_handler  # noqa: F401
-except ImportError:
-    pass
 
 # I/O utilities
 from muflow.io import (
@@ -152,27 +146,30 @@ __all__ = [
     "run_plan_locally",
 ]
 
-# Optional: LambdaBackend (requires boto3)
+# Optional: StepFunctionsBackend (requires boto3)
 try:
-    from muflow.backends import LambdaBackend  # noqa: F401
-    __all__.extend(["LambdaBackend", "create_lambda_handler"])
+    from muflow.backends import StepFunctionsBackend, create_lambda_handler  # noqa: F401
+    __all__.extend(["StepFunctionsBackend", "create_lambda_handler"])
 except ImportError:
     pass
+
+# Completion callbacks (always available)
+from muflow.backends.callbacks import (  # noqa: F401
+    CeleryCompletionCallback,
+    CompletionCallback,
+    LoggingCompletionCallback,
+    NoOpCompletionCallback,
+)
+__all__.extend([
+    "CompletionCallback",
+    "CeleryCompletionCallback",
+    "NoOpCompletionCallback",
+    "LoggingCompletionCallback",
+])
 
 # Optional: CeleryBackend (requires celery)
 try:
     from muflow.backends import CeleryBackend, create_celery_task  # noqa: F401
-    from muflow.backends.callbacks import (  # noqa: F401
-        CeleryCompletionCallback,
-        CompletionCallback,
-        NoOpCompletionCallback,
-    )
-    __all__.extend([
-        "CeleryBackend",
-        "create_celery_task",
-        "CompletionCallback",
-        "CeleryCompletionCallback",
-        "NoOpCompletionCallback",
-    ])
+    __all__.extend(["CeleryBackend", "create_celery_task"])
 except ImportError:
     pass

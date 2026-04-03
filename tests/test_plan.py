@@ -279,15 +279,6 @@ class TestWorkflowPlan:
         simple_plan.nodes["C"].cached = True
         assert simple_plan.is_complete(completed=set())
 
-    def test_get_dependency_prefixes(self, fan_out_plan):
-        """get_dependency_prefixes() should return prefix map."""
-        prefixes = fan_out_plan.get_dependency_prefixes("C")
-        assert prefixes == {
-            "B1": "prefix/b1",
-            "B2": "prefix/b2",
-            "B3": "prefix/b3",
-        }
-
     def test_to_dict(self, simple_plan):
         """Should serialize to dict."""
         d = simple_plan.to_dict()

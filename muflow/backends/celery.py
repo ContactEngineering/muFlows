@@ -49,6 +49,10 @@ class CeleryBackend:
         Celery application instance.
     bucket : str
         S3 bucket for workflow I/O.
+    base_prefix : str
+        S3 key prefix that was passed to ``WorkflowPlanner`` when the plan
+        was built.  Used to recompute dependency storage prefixes keyed by
+        their access names.  Default: ``"muflow"``.
     task_name : str
         Name of the Celery task for node execution.
         Defaults to "muflow.execute_node".
@@ -60,9 +64,9 @@ class CeleryBackend:
     >>> from muflow.backends import CeleryBackend
     >>>
     >>> app = Celery("myapp")
-    >>> backend = CeleryBackend(app, bucket="my-bucket")
+    >>> backend = CeleryBackend(app, bucket="my-bucket", base_prefix="muflow")
     >>>
-    >>> plan = WorkflowPlanner().build_plan(...)
+    >>> plan = WorkflowPlanner(base_prefix="muflow").build_plan(...)
     >>> plan_id = backend.submit_plan(plan)
     """
 
@@ -70,10 +74,12 @@ class CeleryBackend:
         self,
         celery_app,
         bucket: str,
+        base_prefix: str = "muflow",
         task_name: str = "muflow.execute_node",
     ):
         self._app = celery_app
         self._bucket = bucket
+        self._base_prefix = base_prefix
         self._task_name = task_name
         self._plan_results: dict[str, object] = {}  # plan_id -> AsyncResult
 
@@ -286,11 +292,12 @@ class CeleryBackend:
         celery.canvas.Signature
             Celery task signature.
         """
-        # Build dependency prefixes
-        dependency_prefixes = {
-            dep_key: plan.nodes[dep_key].storage_prefix
-            for dep_key in node.depends_on
-        }
+        # Build dependency prefixes keyed by access name (e.g. "surface_0"),
+        # not by node key, so workflows can call ctx.dependency("surface_0").
+        from muflow.planner import get_dependency_access_map
+        dependency_prefixes = get_dependency_access_map(
+            plan, node.key, base_prefix=self._base_prefix
+        )
 
         # Build payload dict
         payload_dict = {

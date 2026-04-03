@@ -141,25 +141,6 @@ class WorkflowPlan(pydantic.BaseModel):
         root = self.nodes[self.root_key]
         return root.key in completed or root.cached
 
-    def get_dependency_prefixes(self, node_key: str) -> dict[str, str]:
-        """Get storage prefixes for a node's dependencies.
-
-        Parameters
-        ----------
-        node_key : str
-            Key of the node.
-
-        Returns
-        -------
-        dict[str, str]
-            Mapping from dependency key to storage prefix.
-        """
-        node = self.nodes[node_key]
-        return {
-            dep_key: self.nodes[dep_key].storage_prefix
-            for dep_key in node.depends_on
-        }
-
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
         return self.model_dump(mode="json")

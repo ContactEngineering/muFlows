@@ -33,7 +33,6 @@ class TestWorkflowContext:
             kwargs = {"param1": "value1", "param2": 42}
             ctx = create_local_context(path=tmpdir, kwargs=kwargs)
             assert ctx.kwargs == kwargs
-            assert ctx._raw_kwargs == kwargs
 
     def test_save_and_read_json(self):
         """Should save and read JSON files."""

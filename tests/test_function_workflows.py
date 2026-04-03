@@ -42,8 +42,11 @@ class TestRegisterWorkflow:
         assert entry.fn is simple
 
     def test_decorator_with_all_metadata(self):
+        from typing import Annotated
+        from muflow import IdentityKey
+
         class Params(pydantic.BaseModel):
-            threshold: float = 0.5
+            threshold: Annotated[float, IdentityKey()] = 0.5
 
         @register_workflow(
             name="test.full",
@@ -51,7 +54,6 @@ class TestRegisterWorkflow:
             queue="analysis",
             dependencies={"dep": "other.workflow"},
             parameters=Params,
-            identity_keys=["threshold"],
         )
         def full(context):
             pass
