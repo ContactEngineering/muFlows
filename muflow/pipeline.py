@@ -156,74 +156,10 @@ class Pipeline:
         ordered = self._topological_sort()
 
         for step_name in ordered:
-            step = self.steps[step_name]
-
-            # Enumerate jobs for this step
-            if isinstance(step, ForEach):
-                job_kwargs_list = step.over(subject_key, kwargs)
-            elif isinstance(step, Step) and step.kwargs_map:
-                job_kwargs_list = [step.kwargs_map(subject_key, kwargs)]
-            else:
-                job_kwargs_list = [{}]
-
-            # Collect upstream node keys from ``after`` steps
-            upstream_keys = []
-            for ref in step.after:
-                upstream_keys.extend(step_node_keys.get(ref, []))
-
-            # Build dependency access map: access_key -> storage_prefix
-            dep_access_map: Dict[str, str] = {}
-            for ref in step.after:
-                ref_keys = step_node_keys.get(ref, [])
-                if len(ref_keys) == 1:
-                    dep_access_map[ref] = nodes[ref_keys[0]].storage_prefix
-                else:
-                    for i, nk in enumerate(ref_keys):
-                        dep_access_map[f"{ref}:{i}"] = nodes[nk].storage_prefix
-
-            # Create one node per job
-            step_keys: List[str] = []
-            for job_kw in job_kwargs_list:
-                merged_kwargs = {**kwargs, **job_kw}
-                workflow_name = step.workflow
-
-                entry = get_entry(workflow_name)
-                identity_keys = entry.identity_keys if entry else None
-
-                hash_dict = {
-                    "workflow": workflow_name,
-                    "subject": subject_key,
-                    **merged_kwargs,
-                }
-                storage_prefix = compute_prefix(
-                    hash_dict,
-                    base_prefix=base_prefix,
-                    identity_keys=identity_keys,
-                )
-                node_key = storage_prefix
-
-                cached = is_cached(workflow_name, subject_key, merged_kwargs)
-
-                output_files: List[str] = []
-                if entry and entry.outputs and hasattr(entry.outputs, "files"):
-                    output_files = list(entry.outputs.files.keys())
-
-                node = WorkflowNode(
-                    key=node_key,
-                    function=workflow_name,
-                    subject_key=subject_key,
-                    kwargs=merged_kwargs,
-                    storage_prefix=storage_prefix,
-                    depends_on=list(upstream_keys),
-                    depended_on_by=[],
-                    output_files=output_files,
-                    cached=cached,
-                    dependency_access_map=dict(dep_access_map),
-                )
-                nodes[node_key] = node
-                step_keys.append(node_key)
-
-            step_node_keys[step_name] = step_keys
+            step_node_keys[step_name] = self._build_step_nodes(
+                step_name, nodes, step_node_keys,
+                subject_key, kwargs, is_cached, base_prefix,
+            )
 
         # Compute reverse edges
         for node in nodes.values():
@@ -242,6 +178,94 @@ class Pipeline:
         )
 
         return WorkflowPlan(nodes=nodes, root_key=root_key)
+
+    def _build_step_nodes(
+        self,
+        step_name: str,
+        nodes: Dict[str, WorkflowNode],
+        step_node_keys: Dict[str, List[str]],
+        subject_key: str,
+        kwargs: dict,
+        is_cached: Callable,
+        base_prefix: str,
+    ) -> List[str]:
+        """Create WorkflowNodes for a single pipeline step.
+
+        Returns the list of node keys created.
+        """
+        step = self.steps[step_name]
+
+        # Enumerate jobs for this step
+        if isinstance(step, ForEach):
+            job_kwargs_list = step.over(subject_key, kwargs)
+        elif isinstance(step, Step) and step.kwargs_map:
+            job_kwargs_list = [step.kwargs_map(subject_key, kwargs)]
+        else:
+            job_kwargs_list = [{}]
+
+        # Collect upstream node keys from ``after`` steps
+        upstream_keys = []
+        for ref in step.after:
+            upstream_keys.extend(step_node_keys.get(ref, []))
+
+        # Build dependency access map: access_key -> storage_prefix
+        dep_access_map = self._build_access_map(
+            step.after, step_node_keys, nodes,
+        )
+
+        # Create one node per job
+        step_keys: List[str] = []
+        for job_kw in job_kwargs_list:
+            merged_kwargs = {**kwargs, **job_kw}
+            workflow_name = step.workflow
+
+            entry = get_entry(workflow_name)
+            identity_keys = entry.identity_keys if entry else None
+
+            storage_prefix = compute_prefix(
+                {"workflow": workflow_name, "subject": subject_key,
+                 **merged_kwargs},
+                base_prefix=base_prefix,
+                identity_keys=identity_keys,
+            )
+
+            output_files: List[str] = []
+            if entry and entry.outputs and hasattr(entry.outputs, "files"):
+                output_files = list(entry.outputs.files.keys())
+
+            node = WorkflowNode(
+                key=storage_prefix,
+                function=workflow_name,
+                subject_key=subject_key,
+                kwargs=merged_kwargs,
+                storage_prefix=storage_prefix,
+                depends_on=list(upstream_keys),
+                depended_on_by=[],
+                output_files=output_files,
+                cached=is_cached(workflow_name, subject_key, merged_kwargs),
+                dependency_access_map=dict(dep_access_map),
+            )
+            nodes[storage_prefix] = node
+            step_keys.append(storage_prefix)
+
+        return step_keys
+
+    @staticmethod
+    def _build_access_map(
+        after_refs: list[str],
+        step_node_keys: Dict[str, List[str]],
+        nodes: Dict[str, WorkflowNode],
+    ) -> Dict[str, str]:
+        """Build the dependency access map for a step."""
+        dep_access_map: Dict[str, str] = {}
+        for ref in after_refs:
+            ref_keys = step_node_keys.get(ref, [])
+            if len(ref_keys) == 1:
+                dep_access_map[ref] = nodes[ref_keys[0]].storage_prefix
+            else:
+                for i, nk in enumerate(ref_keys):
+                    dep_access_map[f"{ref}:{i}"] = nodes[nk].storage_prefix
+        return dep_access_map
 
     # ── Internal helpers ──────────────────────────────────────────
 
