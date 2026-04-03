@@ -292,12 +292,8 @@ class CeleryBackend:
         celery.canvas.Signature
             Celery task signature.
         """
-        # Build dependency prefixes keyed by access name (e.g. "surface_0"),
-        # not by node key, so workflows can call ctx.dependency("surface_0").
-        from muflow.planner import get_dependency_access_map
-        dependency_prefixes = get_dependency_access_map(
-            plan, node.key, base_prefix=self._base_prefix
-        )
+        # Use pre-computed dependency access map from plan
+        dependency_prefixes = node.dependency_access_map
 
         # Build payload dict
         payload_dict = {

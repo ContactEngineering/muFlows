@@ -185,7 +185,6 @@ class LocalBackend:
             If any node fails during execution.
         """
         from muflow import ExecutionPayload, create_local_context, execute_workflow
-        from muflow.planner import get_dependency_access_map
 
         plan_id = plan.root_key
         self._plan_states[plan_id] = "running"
@@ -212,10 +211,8 @@ class LocalBackend:
                     if on_node_start:
                         on_node_start(node.key)
 
-                    # Build dependency paths using access keys (not node keys)
-                    dependency_paths = get_dependency_access_map(
-                        plan, node.key, base_prefix=self.base_path
-                    )
+                    # Use pre-computed dependency access map from plan
+                    dependency_paths = node.dependency_access_map
 
                     # Create context
                     ctx = create_local_context(

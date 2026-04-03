@@ -3,7 +3,6 @@
 import pytest
 
 from muflow import WorkflowPlanner, WorkflowSpec, register_workflow
-from muflow.planner import get_dependency_access_map
 from muflow.registry import clear
 
 
@@ -369,11 +368,11 @@ class TestWorkflowPlannerCycleDetection:
             planner.build_plan("test.self", "tag:1", {})
 
 
-class TestGetDependencyAccessMap:
-    """Tests for get_dependency_access_map function."""
+class TestDependencyAccessMap:
+    """Tests for dependency_access_map on WorkflowNode."""
 
-    def test_returns_access_keys(self):
-        """Should map access keys to storage prefixes."""
+    def test_populated_at_build_time(self):
+        """Planner should populate dependency_access_map on each node."""
 
         @register_workflow(name="test.features")
         def features(context):
@@ -389,13 +388,11 @@ class TestGetDependencyAccessMap:
         planner = WorkflowPlanner()
         plan = planner.build_plan("test.training", "tag:1", {})
 
-        training_key = plan.root_key
-        access_map = get_dependency_access_map(plan, training_key)
-
-        assert "my_features" in access_map
+        training_node = plan.nodes[plan.root_key]
+        assert "my_features" in training_node.dependency_access_map
         # The value should be a storage prefix (string)
-        assert isinstance(access_map["my_features"], str)
-        assert "test.features" in access_map["my_features"]
+        assert isinstance(training_node.dependency_access_map["my_features"], str)
+        assert "test.features" in training_node.dependency_access_map["my_features"]
 
 
 class TestPlanExecution:

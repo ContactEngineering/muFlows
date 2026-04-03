@@ -169,6 +169,16 @@ class WorkflowContext:
             progress_reporter=self._progress_reporter,
         )
 
+    def dependency_keys(self) -> list[str]:
+        """Return available dependency access keys.
+
+        Returns
+        -------
+        list[str]
+            Sorted list of dependency keys (e.g., ``["features:0", "features:1"]``).
+        """
+        return sorted(self._dependency_storages.keys())
+
     # ── Progress reporting ──────────────────────────────────────────────
 
     def report_progress(self, current: int, total: int, message: str = "") -> None:

@@ -250,6 +250,7 @@ class WorkflowPlanner:
                 _resolving,
             )
             node.depends_on.append(dep_node_key)
+            node.dependency_access_map[dep_key] = nodes[dep_node_key].storage_prefix
             _log.debug(f"  {node.function} depends on {spec.workflow} ({dep_key})")
 
     def _resolve_productions(

@@ -393,14 +393,10 @@ class StepFunctionsBackend:
         """Build the Lambda event payload for a node.
 
         Dependency prefixes are keyed by their *access keys* (e.g.
-        ``"surface_0"``) so that workflow code can call
-        ``ctx.dependency("surface_0")`` correctly.
+        ``"features:0"``) so that workflow code can call
+        ``ctx.dependency("features:0")`` correctly.
         """
-        from muflow.planner import get_dependency_access_map
-
-        dependency_prefixes = get_dependency_access_map(
-            plan, node.key, base_prefix=self._base_prefix
-        )
+        dependency_prefixes = node.dependency_access_map
         return {
             "workflow_name": node.function,
             "kwargs": node.kwargs,

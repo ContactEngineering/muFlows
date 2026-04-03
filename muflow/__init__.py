@@ -68,8 +68,11 @@ from muflow.outputs import OutputFile, get_outputs_schema
 # Plan data structures
 from muflow.plan import WorkflowNode, WorkflowPlan
 
+# Pipeline
+from muflow.pipeline import ForEach, Pipeline, Step
+
 # Planner
-from muflow.planner import WorkflowPlanner, get_dependency_access_map
+from muflow.planner import WorkflowPlanner
 from muflow.registry import IdentityKey, WorkflowEntry, register_workflow
 
 # Storage backends
@@ -124,7 +127,10 @@ __all__ = [
     "WorkflowPlan",
     # Planner
     "WorkflowPlanner",
-    "get_dependency_access_map",
+    # Pipeline
+    "Pipeline",
+    "Step",
+    "ForEach",
     # Dependencies
     "WorkflowSpec",
     # Backends
