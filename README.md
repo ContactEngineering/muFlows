@@ -23,16 +23,16 @@ pip install muflow[dev]
 ## Architecture
 
 ```
-┌──────────────────────────────────────────────────┐
-│                    User Code                     │
-│  @register_workflow()    Pipeline(steps={...})    │
-└──────────────────────────┬───────────────────────┘
-                           │
-                           ▼
+┌─────────────────────────────────────────────────┐
+│                    User Code                    │
+│  @register_workflow()    Pipeline(steps={...})  │
+└────────────────────────┬────────────────────────┘
+                         │
+                         ▼
               ┌──────────────────────┐
               │  Pipeline.build_plan │
-              │  (compiles steps     │
-              │   into static DAG)   │
+              │   (compiles steps    │
+              │    into static DAG)  │
               └──────────┬───────────┘
                          │
                          ▼

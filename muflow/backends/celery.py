@@ -160,6 +160,14 @@ class CeleryBackend:
             "FAILURE": "failure",
             "REVOKED": "failure",
         }
+
+        # GroupResult (from group/chord) doesn't have .state;
+        # check if all children completed instead.
+        if not hasattr(result, "state"):
+            if result.ready():
+                return "failure" if result.failed() else "success"
+            return "running"
+
         return state_map.get(result.state, "pending")
 
     def cancel_plan(self, plan_id: str) -> None:
@@ -304,11 +312,13 @@ class CeleryBackend:
         # Get queue from node or use default
         queue = getattr(node, 'queue', None) or "default"
 
-        # Create task signature
+        # Create immutable task signature (prevents chord from injecting
+        # the header-group result as an extra positional argument)
         return self._app.signature(
             self._task_name,
             args=[node.key, payload_dict, self._bucket],
             queue=queue,
+            immutable=True,
         )
 
 

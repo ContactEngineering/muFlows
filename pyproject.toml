@@ -29,13 +29,17 @@ dependencies = [
 s3 = [
     "boto3>=1.26.0",
 ]
+celery = [
+    "celery>=5.0.0",
+]
 test = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "moto[s3]>=4.0.0",
+    "celery>=5.0.0",
 ]
 dev = [
-    "muflow[s3,test]",
+    "muflow[s3,test,celery]",
     "black>=23.0.0",
     "isort>=5.12.0",
     "mypy>=1.0.0",
