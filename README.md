@@ -1,5 +1,7 @@
 # muFlow
 
+*Pronounced "microflow" (μFlow).*
+
 Backend-agnostic workflow execution engine.
 
 ## Overview
