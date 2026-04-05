@@ -84,7 +84,6 @@ class TestTaskNode:
         assert node.key == "test/node"
         assert node.function == "my.task"
         assert node.depends_on == []
-        assert node.cached is False
 
     def test_to_dict(self):
         """Should serialize to dict."""
@@ -112,13 +111,11 @@ class TestTaskNode:
             "depends_on": ["dep1"],
             "depended_on_by": [],
             "output_files": ["result.json"],
-            "cached": True,
             "analysis_id": 42,
         }
         node = TaskNode.from_dict(d)
         assert node.key == "test/node"
         assert node.depends_on == ["dep1"]
-        assert node.cached is True
         assert node.analysis_id == 42
 
 
@@ -260,24 +257,12 @@ class TestTaskPlan:
         keys = {n.key for n in ready}
         assert keys == {"C"}
 
-    def test_ready_nodes_respects_cached(self, simple_plan):
-        """ready_nodes() should skip cached nodes."""
-        simple_plan.nodes["A"].cached = True
-        ready = simple_plan.ready_nodes(completed=set())
-        assert len(ready) == 1
-        assert ready[0].key == "B"  # B is ready because A is cached
-
     def test_is_complete(self, simple_plan):
         """is_complete() should return True when root is complete."""
         assert not simple_plan.is_complete(completed=set())
         assert not simple_plan.is_complete(completed={"A"})
         assert not simple_plan.is_complete(completed={"A", "B"})
         assert simple_plan.is_complete(completed={"A", "B", "C"})
-
-    def test_is_complete_cached_root(self, simple_plan):
-        """is_complete() should return True when root is cached."""
-        simple_plan.nodes["C"].cached = True
-        assert simple_plan.is_complete(completed=set())
 
     def test_to_dict(self, simple_plan):
         """Should serialize to dict."""

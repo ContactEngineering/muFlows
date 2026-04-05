@@ -183,21 +183,3 @@ class TestMLTaskReadyNodesProgression:
         assert plan.is_complete(completed)
 
 
-class TestMLTaskCaching:
-    """Tests for caching in the ML pipeline."""
-
-    def test_cached_features_skip_to_training(self):
-        """If all features are cached, training becomes immediately ready."""
-        from muflow.examples.ml_task import ml_pipeline
-
-        plan = ml_pipeline.build_plan(
-            subject_key="experiment:1",
-            kwargs={"datasets": DATASETS},
-            is_cached=lambda name, *_: name == "ml.compute_features",
-        )
-
-        ready = plan.ready_nodes(set())
-        functions = {n.function for n in ready}
-        assert "ml.compute_features" not in functions
-        assert "ml.train_model" in functions
-        assert "ml.loo_cv" in functions

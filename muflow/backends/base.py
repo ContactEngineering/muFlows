@@ -11,6 +11,8 @@ import logging
 from typing import TYPE_CHECKING, Callable, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from muflow.backends.callbacks import CompletionCallback
+    from muflow.backends.handle import PlanHandle
     from muflow.plan import TaskPlan
 
 _log = logging.getLogger(__name__)
@@ -39,10 +41,8 @@ class ExecutionBackend(Protocol):
     def submit_plan(
         self,
         plan: "TaskPlan",
-        on_node_start: Optional[Callable[[str], None]] = None,
-        on_node_complete: Optional[Callable[[str], None]] = None,
-        on_node_failure: Optional[Callable[[str, str], None]] = None,
-    ) -> str:
+        completion_callback: Optional["CompletionCallback"] = None,
+    ) -> "PlanHandle":
         """Submit an entire task plan for execution.
 
         The backend orchestrates the DAG using its native primitives.
@@ -53,17 +53,14 @@ class ExecutionBackend(Protocol):
         ----------
         plan : TaskPlan
             Complete task plan with all nodes and dependencies.
-        on_node_start : callable, optional
-            Callback when a node starts: (node_key) -> None
-        on_node_complete : callable, optional
-            Callback when a node completes: (node_key) -> None
-        on_node_failure : callable, optional
-            Callback when a node fails: (node_key, error_message) -> None
+        completion_callback : CompletionCallback, optional
+            Called when the plan finishes (success or failure).
+            Receives (plan_id, success, error).
 
         Returns
         -------
-        str
-            Plan execution ID for tracking.
+        PlanHandle
+            Serializable handle for querying state and cancelling.
         """
         ...
 
@@ -73,7 +70,7 @@ class ExecutionBackend(Protocol):
         Parameters
         ----------
         plan_id : str
-            Plan execution ID returned by submit_plan().
+            Plan execution ID (from PlanHandle.plan_id).
 
         Returns
         -------
@@ -88,7 +85,7 @@ class ExecutionBackend(Protocol):
         Parameters
         ----------
         plan_id : str
-            Plan execution ID returned by submit_plan().
+            Plan execution ID (from PlanHandle.plan_id).
         """
         ...
 
@@ -120,8 +117,8 @@ class LocalBackend:
     >>>
     >>> # Execute locally
     >>> backend = LocalBackend("/tmp/output")
-    >>> plan_id = backend.submit_plan(plan)
-    >>> print(f"Completed: {plan_id}")
+    >>> handle = backend.submit_plan(plan)
+    >>> print(f"Completed: {handle.plan_id}")
     """
 
     def __init__(
@@ -130,19 +127,6 @@ class LocalBackend:
         registry_get: Optional[Callable] = None,
         progress_reporter: Optional[Callable[[int, int, str], None]] = None,
     ):
-        """Initialize the local backend.
-
-        Parameters
-        ----------
-        base_path : str
-            Base directory for task storage.
-        registry_get : callable, optional
-            Function to get task entries by name.
-            Defaults to `muflow.registry.get`.
-        progress_reporter : callable, optional
-            Function called with (current, total, message) for progress updates.
-            Defaults to printing to stdout with right-aligned percentage.
-        """
         from muflow import registry
 
         self.base_path = base_path
@@ -153,10 +137,11 @@ class LocalBackend:
     def submit_plan(
         self,
         plan: "TaskPlan",
+        completion_callback: Optional["CompletionCallback"] = None,
         on_node_start: Optional[Callable[[str], None]] = None,
         on_node_complete: Optional[Callable[[str], None]] = None,
         on_node_failure: Optional[Callable[[str, str], None]] = None,
-    ) -> str:
+    ) -> "PlanHandle":
         """Execute the entire plan synchronously.
 
         Nodes are executed in dependency order. Execution blocks until
@@ -166,17 +151,19 @@ class LocalBackend:
         ----------
         plan : TaskPlan
             Complete task plan.
+        completion_callback : CompletionCallback, optional
+            Called with (plan_id, success, error) when the plan finishes.
         on_node_start : callable, optional
-            Callback when a node starts execution.
+            Called with (node_key) when a node starts. Local-only.
         on_node_complete : callable, optional
-            Callback when a node completes successfully.
+            Called with (node_key) when a node completes. Local-only.
         on_node_failure : callable, optional
-            Callback when a node fails.
+            Called with (node_key, error_message) when a node fails. Local-only.
 
         Returns
         -------
-        str
-            Plan execution ID (the plan's root_key).
+        PlanHandle
+            Handle with backend="local". get_state() always returns "success".
 
         Raises
         ------
@@ -184,15 +171,14 @@ class LocalBackend:
             If any node fails during execution.
         """
         from muflow import ExecutionPayload, create_local_context, execute_task
+        from muflow.backends.handle import PlanHandle
 
         plan_id = plan.root_key
         self._plan_states[plan_id] = "running"
 
-        # Initialize completed set with cached nodes
-        completed = {k for k, n in plan.nodes.items() if n.cached}
+        completed: set[str] = set()
 
-        _log.info(f"Executing plan {plan_id} with {len(plan.nodes)} nodes "
-                  f"({len(completed)} cached)")
+        _log.info(f"Executing plan {plan_id} with {len(plan.nodes)} nodes")
 
         try:
             while not plan.is_complete(completed):
@@ -210,10 +196,8 @@ class LocalBackend:
                     if on_node_start:
                         on_node_start(node.key)
 
-                    # Use pre-computed dependency access map from plan
                     dependency_paths = node.dependency_access_map
 
-                    # Create context
                     ctx = create_local_context(
                         path=node.storage_prefix,
                         kwargs=node.kwargs,
@@ -221,7 +205,6 @@ class LocalBackend:
                         progress_reporter=self.progress_reporter,
                     )
 
-                    # Build payload
                     payload = ExecutionPayload(
                         task_name=node.function,
                         kwargs=node.kwargs,
@@ -229,7 +212,6 @@ class LocalBackend:
                         dependency_prefixes=dependency_paths,
                     )
 
-                    # Execute
                     result = execute_task(payload, ctx, self.registry_get)
 
                     if result.success:
@@ -239,8 +221,9 @@ class LocalBackend:
                             on_node_complete(node.key)
                     else:
                         self._plan_states[plan_id] = "failure"
-                        _log.error(f"Node failed: {node.key[:16]}... - "
-                                   f"{result.error_message}")
+                        _log.error(
+                            f"Node failed: {node.key[:16]}... - {result.error_message}"
+                        )
                         if on_node_failure:
                             on_node_failure(node.key, result.error_message)
                         raise RuntimeError(
@@ -250,10 +233,23 @@ class LocalBackend:
 
             self._plan_states[plan_id] = "success"
             _log.info(f"Plan {plan_id} completed successfully")
-            return plan_id
 
-        except Exception:
+            if completion_callback:
+                completion_callback.notify(plan_id, success=True)
+
+            return PlanHandle(
+                backend="local",
+                plan_id=plan_id,
+                node_prefixes={k: n.storage_prefix for k, n in plan.nodes.items()},
+                storage_type="local",
+                storage_config={},
+            )
+
+        except Exception as exc:
             self._plan_states[plan_id] = "failure"
+            if completion_callback:
+                error_msg = str(exc)
+                completion_callback.notify(plan_id, success=False, error=error_msg)
             raise
 
     def get_plan_state(self, plan_id: str) -> str:

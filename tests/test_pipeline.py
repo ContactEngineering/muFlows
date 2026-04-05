@@ -164,45 +164,6 @@ class TestPipelineBuildPlan:
         assert node.kwargs == {"base": "param", "extra": "val"}
 
 
-class TestPipelineCaching:
-    """Tests for caching in Pipeline."""
-
-    def test_cached_nodes_marked(self):
-        """Nodes should be marked cached when is_cached returns True."""
-        _register_noop("test.a")
-        p = Pipeline(
-            name="p.cache",
-            steps={"only": Step(task="test.a")},
-        )
-        plan = p.build_plan(
-            "tag:1", {},
-            is_cached=lambda *_: True,
-        )
-
-        node = plan.nodes[plan.root_key]
-        assert node.cached is True
-
-    def test_cached_nodes_in_ready_nodes(self):
-        """Cached nodes are skipped by ready_nodes."""
-        _register_noop("test.a")
-        _register_noop("test.b")
-        p = Pipeline(
-            name="p.cache2",
-            steps={
-                "first": Step(task="test.a"),
-                "second": Step(task="test.b", after=["first"]),
-            },
-        )
-        # First step is cached
-        plan = p.build_plan(
-            "tag:1", {},
-            is_cached=lambda name, *_: name == "test.a",
-        )
-
-        ready = plan.ready_nodes(set())
-        assert len(ready) == 1
-        assert ready[0].function == "test.b"
-
 
 class TestPipelineValidation:
     """Tests for pipeline validation."""

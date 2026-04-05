@@ -108,14 +108,10 @@ class TestExecutionResult:
 
     def test_success_result(self):
         """Should create success result."""
-        result = ExecutionResult(
-            success=True,
-            files_written=["result.json"],
-        )
+        result = ExecutionResult(success=True)
         assert result.success is True
         assert result.error_message is None
         assert result.error_traceback is None
-        assert result.files_written == ["result.json"]
 
     def test_failure_result(self):
         """Should create failure result."""
@@ -130,15 +126,11 @@ class TestExecutionResult:
 
     def test_to_dict(self):
         """Should serialize to dictionary."""
-        result = ExecutionResult(
-            success=True,
-            files_written=["result.json"],
-        )
+        result = ExecutionResult(success=True)
         d = result.to_dict()
 
         assert d["success"] is True
         assert d["error_message"] is None
-        assert d["files_written"] == ["result.json"]
 
     def test_from_dict(self):
         """Should deserialize from dictionary."""
@@ -146,7 +138,6 @@ class TestExecutionResult:
             "success": False,
             "error_message": "Error",
             "error_traceback": "Traceback",
-            "files_written": [],
         }
         result = ExecutionResult.from_dict(d)
 
@@ -173,7 +164,6 @@ class TestExecuteTask:
 
             assert result.success is True
             assert result.error_message is None
-            assert "result.json" in result.files_written
 
             # Verify file was written
             data = ctx.read_json("result.json")
@@ -272,6 +262,43 @@ class TestExecuteTask:
 
             assert result.success is False
             assert "protected" in result.error_message
+
+    def test_cached_execution_skips_task(self):
+        """Should skip task execution when manifest.json already exists."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Pre-create a manifest to simulate a cached result
+            manifest_path = Path(tmpdir) / "manifest.json"
+            manifest_path.write_text('{"files": ["result.json"], "timestamp": "2024-01-01T00:00:00+00:00"}')
+
+            payload = ExecutionPayload(
+                task_name="test.mock_task",
+                kwargs={"user_id": 99},
+                storage_prefix=tmpdir,
+            )
+            ctx = create_local_context(path=tmpdir, kwargs=payload.kwargs)
+
+            result = execute_task(payload, ctx, get_test_implementation)
+
+            assert result.success is True
+            assert result.cached is True
+
+            # Manifest should remain unchanged (not overwritten by execute_task)
+            assert manifest_path.read_text() == '{"files": ["result.json"], "timestamp": "2024-01-01T00:00:00+00:00"}'
+
+    def test_normal_execution_has_cached_false(self):
+        """Normal (non-cached) execution should have cached=False."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            payload = ExecutionPayload(
+                task_name="test.mock_task",
+                kwargs={"user_id": 1},
+                storage_prefix=tmpdir,
+            )
+            ctx = create_local_context(path=tmpdir, kwargs=payload.kwargs)
+
+            result = execute_task(payload, ctx, get_test_implementation)
+
+            assert result.success is True
+            assert result.cached is False
 
     def test_executor_writes_context_json(self):
         """Should write context.json before execution."""

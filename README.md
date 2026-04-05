@@ -215,19 +215,16 @@ prefix = compute_prefix(
 
 ### Caching
 
-Both `Pipeline.build_plan()` and `TaskPlanner.build_plan()` accept an `is_cached` callback. Cached nodes are skipped during execution, and their dependents treat them as already completed:
+Caching is automatic and requires no configuration. When `execute_task()` runs a node, it first checks whether `manifest.json` already exists at the node's storage prefix. If it does, the task is skipped and marked cached — the node counts as completed and downstream tasks proceed normally.
 
 ```python
-def check_cache(task_name, subject_key, kwargs):
-    prefix = compute_prefix({"task": task_name, "subject": subject_key, **kwargs})
-    return storage.exists(f"{prefix}/manifest.json")
-
+# Re-running the same plan reuses any already-complete nodes automatically.
 plan = ml_pipeline.build_plan(
-    "experiment:1",
-    {"datasets": ["a", "b", "c"]},
-    is_cached=check_cache,
+    subject_key="experiment:1",
+    kwargs={"datasets": ["a", "b", "c"]},
 )
-# Cached feature nodes are skipped → training starts immediately
+backend.submit_plan(plan)
+# feature nodes with existing manifest.json are skipped instantly
 ```
 
 ### Identity Keys
@@ -255,11 +252,24 @@ def train(context):
 - **`CeleryBackend`** — Celery chord/group for parallel execution
 - **`StepFunctionsBackend`** — AWS Step Functions with Lambda
 
+`submit_plan()` returns a `PlanHandle` — a serialisable reference to the submitted execution:
+
 ```python
-from muflow import LocalBackend
+from muflow.backends import LocalBackend
 
 backend = LocalBackend(base_path="/tmp/results")
-backend.submit_plan(plan)
+handle = backend.submit_plan(plan)
+
+# Query state (no S3 queries; uses Redis for Celery, sfn.describe_execution for SFN)
+print(handle.get_state())   # "success" | "failure" | "running" | "pending"
+
+# Check per-node progress (checks manifest.json at each node's storage prefix)
+progress = handle.get_progress()
+print(f"{progress.completed}/{progress.total} nodes complete")
+
+# Persist across processes (e.g. store in a Django model field)
+stored = handle.to_json()
+handle = PlanHandle.from_json(stored)
 ```
 
 ## Testing

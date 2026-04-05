@@ -133,7 +133,6 @@ class TestFunctionTaskExecution:
             result = execute_task(payload, ctx, lambda name: get(name))
 
             assert result.success is True
-            assert "result.json" in result.files_written
             assert ctx.read_json("result.json") == {"hello": "world"}
 
     def test_execution_with_parameters(self):

@@ -111,35 +111,3 @@ def diamond_plan() -> TaskPlan:
     return TaskPlan(nodes=nodes, root_key=d.key)
 
 
-def all_cached_plan() -> TaskPlan:
-    """Single cached node."""
-    node = TaskNode(
-        key="muflow/test.simple/aaa",
-        function="test.simple",
-        subject_key="sub:1",
-        kwargs={},
-        storage_prefix="muflow/test.simple/aaa",
-        cached=True,
-    )
-    return TaskPlan(nodes={node.key: node}, root_key=node.key)
-
-
-def partial_cache_plan() -> TaskPlan:
-    """Cached dep → non-cached root."""
-    dep = TaskNode(
-        key="d",
-        function="test.dep",
-        subject_key="s",
-        kwargs={},
-        storage_prefix="d",
-        cached=True,
-    )
-    root = TaskNode(
-        key="r",
-        function="test.root",
-        subject_key="s",
-        kwargs={},
-        storage_prefix="r",
-        depends_on=["d"],
-    )
-    return TaskPlan(nodes={"d": dep, "r": root}, root_key="r")

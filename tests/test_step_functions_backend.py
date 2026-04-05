@@ -5,7 +5,6 @@ import json
 import pytest
 
 from tests.conftest import (
-    all_cached_plan,
     fan_in_plan,
     linear_plan,
     simple_plan,
@@ -205,19 +204,17 @@ class TestStateMachineName:
 
 
 class TestSubmitPlan:
-    def test_creates_state_machine_and_returns_arn(self, backend, sfn_client):
+    def test_creates_state_machine_and_returns_handle(self, backend, sfn_client):
+        from muflow.backends.handle import PlanHandle
+
         with mock_aws():
             plan = simple_plan()
-            execution_arn = backend.submit_plan(plan)
+            handle = backend.submit_plan(plan)
 
-            assert "arn:aws:states" in execution_arn
-            assert "exec-" in execution_arn
-
-    def test_all_cached_returns_sentinel(self, backend):
-        with mock_aws():
-            plan = all_cached_plan()
-            result = backend.submit_plan(plan)
-            assert result.startswith("cached-")
+            assert isinstance(handle, PlanHandle)
+            assert handle.backend == "step_functions"
+            assert "arn:aws:states" in handle.plan_id
+            assert "exec-" in handle.plan_id
 
     def test_state_machine_created_with_correct_name(self, backend, sfn_client):
         with mock_aws():
@@ -252,25 +249,24 @@ class TestSubmitPlan:
             machines = sfn_client.list_state_machines()["stateMachines"]
             assert len(machines) == 1
 
-    def test_callbacks_ignored_with_warning(self, backend, caplog):
+    def test_completion_callback_logs_warning(self, backend, caplog):
+        """Passing completion_callback to SFN backend logs a warning."""
         import logging
+        from muflow.backends.callbacks import NoOpCompletionCallback
+
         with mock_aws():
             plan = simple_plan()
             with caplog.at_level(logging.WARNING):
-                backend.submit_plan(plan, on_node_complete=lambda k: None)
+                backend.submit_plan(plan, completion_callback=NoOpCompletionCallback())
             assert "not supported" in caplog.text.lower()
 
 
 class TestGetPlanState:
-    def test_cached_sentinel_returns_success(self, backend):
-        with mock_aws():
-            assert backend.get_plan_state("cached-anything") == "success"
-
     def test_running_execution(self, backend, sfn_client):
         with mock_aws():
             plan = simple_plan()
-            execution_arn = backend.submit_plan(plan)
-            state = backend.get_plan_state(execution_arn)
+            handle = backend.submit_plan(plan)
+            state = backend.get_plan_state(handle.plan_id)
             # moto keeps executions in RUNNING state (no actual Lambda)
             assert state in ("running", "success", "failure")
 
@@ -278,7 +274,7 @@ class TestGetPlanState:
         """Unmapped SF statuses fall back to 'pending'."""
         with mock_aws():
             plan = simple_plan()
-            execution_arn = backend.submit_plan(plan)
+            handle = backend.submit_plan(plan)
             # Patch describe_execution to return an unexpected status
             original = sfn_client.describe_execution
 
@@ -288,20 +284,15 @@ class TestGetPlanState:
                 return r
 
             sfn_client.describe_execution = patched
-            assert backend.get_plan_state(execution_arn) == "pending"
+            assert backend.get_plan_state(handle.plan_id) == "pending"
 
 
 class TestCancelPlan:
-    def test_cached_sentinel_is_noop(self, backend):
-        with mock_aws():
-            # Should not raise
-            backend.cancel_plan("cached-anything")
-
     def test_stop_execution_called(self, backend, sfn_client):
         with mock_aws():
             plan = simple_plan()
-            execution_arn = backend.submit_plan(plan)
+            handle = backend.submit_plan(plan)
             # moto supports stop_execution
-            backend.cancel_plan(execution_arn)
-            desc = sfn_client.describe_execution(executionArn=execution_arn)
+            backend.cancel_plan(handle.plan_id)
+            desc = sfn_client.describe_execution(executionArn=handle.plan_id)
             assert desc["status"] in ("ABORTED", "STOPPED", "RUNNING")

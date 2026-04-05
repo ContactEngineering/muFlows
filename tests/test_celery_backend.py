@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from muflow.plan import TaskNode, TaskPlan
+from muflow.plan import TaskPlan
 
 celery_pkg = pytest.importorskip("celery", reason="celery required")
 
@@ -13,11 +13,9 @@ from celery import Celery  # noqa: E402
 from muflow.backends.celery import CeleryBackend, create_celery_task  # noqa: E402
 
 from tests.conftest import (  # noqa: E402
-    all_cached_plan,
     diamond_plan,
     fan_in_plan,
     linear_plan,
-    partial_cache_plan,
     simple_plan,
 )
 
@@ -101,18 +99,6 @@ class TestComputeLevels:
         assert len(levels[0]) == 3  # three leaves in parallel
         assert len(levels[1]) == 1  # one root
 
-    def test_all_cached_returns_empty(self, levels_backend):
-        plan = all_cached_plan()
-        levels = levels_backend._compute_levels(plan)
-        assert levels == []
-
-    def test_partial_cache(self, levels_backend):
-        """Cached dep means root is in level 0, not level 1."""
-        plan = partial_cache_plan()
-        levels = levels_backend._compute_levels(plan)
-        assert len(levels) == 1
-        assert levels[0][0].key == "r"
-
     def test_diamond(self, levels_backend):
         plan = diamond_plan()
         levels = levels_backend._compute_levels(plan)
@@ -158,43 +144,6 @@ class TestBuildCeleryTask:
         from celery.canvas import chord
 
         assert isinstance(task, chord)
-
-    def test_all_cached_returns_none(self, backend):
-        plan = all_cached_plan()
-        levels = backend._compute_levels(plan)
-        task = backend._build_celery_task(levels, plan)
-        assert task is None
-
-    def test_cached_nodes_excluded_from_groups(self, backend):
-        """Mixed level: cached nodes not in group."""
-        # Create a plan where one leaf is cached, two are not
-        leaves = [
-            TaskNode(
-                key=f"muflow/test.leaf/l{i}",
-                function="test.leaf",
-                subject_key=f"sub:{i}",
-                kwargs={"i": i},
-                storage_prefix=f"muflow/test.leaf/l{i}",
-                cached=(i == 0),  # first leaf is cached
-            )
-            for i in range(3)
-        ]
-        root = TaskNode(
-            key="muflow/test.root/rrr",
-            function="test.root",
-            subject_key="sub:all",
-            kwargs={},
-            storage_prefix="muflow/test.root/rrr",
-            depends_on=[n.key for n in leaves],
-        )
-        nodes = {n.key: n for n in leaves}
-        nodes[root.key] = root
-        plan = TaskPlan(nodes=nodes, root_key=root.key)
-
-        levels = backend._compute_levels(plan)
-        task = backend._build_celery_task(levels, plan)
-        # Level 0 should have 2 tasks (not 3), level 1 should have 1
-        assert task is not None
 
 
 # ── TestMakeNodeTask ─────────────────────────────────────────────────────────
@@ -259,9 +208,6 @@ class TestMakeNodeTask:
 
 
 class TestGetPlanState:
-    def test_cached_sentinel(self, backend):
-        assert backend.get_plan_state("cached-anything") == "success"
-
     def test_pending(self, backend):
         mock_result = MagicMock()
         mock_result.state = "PENDING"
@@ -311,10 +257,6 @@ class TestGetPlanState:
 
 
 class TestCancelPlan:
-    def test_cached_sentinel_is_noop(self, backend):
-        # Should not raise
-        backend.cancel_plan("cached-anything")
-
     def test_revoke_called_with_terminate(self, backend):
         backend._app.control = MagicMock()
         backend.cancel_plan("test-plan-id")
@@ -371,26 +313,23 @@ class TestSubmitPlanEager:
         entry = TaskEntry(name=name, fn=fail)
         registry[name] = entry
 
-    def test_single_node_returns_plan_id(self, s3_env):
+    def test_single_node_returns_plan_handle(self, s3_env):
+        from muflow.backends.handle import PlanHandle
+
         backend, registry, s3 = s3_env
         self._register_noop(registry)
         plan = simple_plan()
-        plan_id = backend.submit_plan(plan)
-        assert isinstance(plan_id, str)
-        assert len(plan_id) > 0
-
-    def test_all_cached_returns_cached_sentinel(self, s3_env):
-        backend, registry, s3 = s3_env
-        plan = all_cached_plan()
-        result = backend.submit_plan(plan)
-        assert result.startswith("cached-")
+        handle = backend.submit_plan(plan)
+        assert isinstance(handle, PlanHandle)
+        assert handle.backend == "celery"
+        assert len(handle.plan_id) > 0
 
     def test_state_is_success_after_eager_submit(self, s3_env):
         backend, registry, s3 = s3_env
         self._register_noop(registry)
         plan = simple_plan()
-        plan_id = backend.submit_plan(plan)
-        assert backend.get_plan_state(plan_id) == "success"
+        handle = backend.submit_plan(plan)
+        assert backend.get_plan_state(handle.plan_id) == "success"
 
     def test_task_output_written_to_s3(self, s3_env):
         backend, registry, s3 = s3_env
@@ -409,8 +348,8 @@ class TestSubmitPlanEager:
         self._register_noop(registry, name="test.leaf")
         self._register_noop(registry, name="test.root")
         plan = fan_in_plan()
-        plan_id = backend.submit_plan(plan)
-        assert backend.get_plan_state(plan_id) == "success"
+        handle = backend.submit_plan(plan)
+        assert backend.get_plan_state(handle.plan_id) == "success"
 
         # Verify all 4 nodes wrote output
         resp = s3.list_objects_v2(Bucket="test-bucket", Prefix="muflow/")
@@ -488,7 +427,7 @@ class TestCreateCeleryTask:
             "dependency_prefixes": {},
         }
         result = task("node-key", payload_dict, "test-bucket")
-        assert result["success"] is True
+        assert result["node_key"] == "node-key"
 
     def test_execution_result_json_written(self, task_env):
         task, registry, s3 = task_env

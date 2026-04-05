@@ -1,80 +1,74 @@
 """Completion callback protocols and implementations.
 
-This module provides callback mechanisms for notifying when a task
-completes. Callbacks are triggered after task execution, regardless
-of success or failure.
+Callbacks notify the calling application when a plan finishes, so that
+it can update state (e.g. a database record) without the workflow itself
+requiring database access.
 
-The callback pattern allows the orchestration layer (e.g., Django) to
-receive notifications from database-agnostic workers without the workers
-needing database access.
+All implementations share the same signature::
+
+    notify(plan_id: str, success: bool, error: Optional[str]) -> None
+
+The ``plan_id`` matches the value stored in :class:`PlanHandle` and
+returned by ``submit_plan()``. Callers that need to map it back to a
+domain object (e.g. an ``analysis_id``) maintain that mapping themselves.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Protocol
-
-from muflow.executor import ExecutionResult
+from typing import Optional, Protocol
 
 _log = logging.getLogger(__name__)
 
 
 class CompletionCallback(Protocol):
-    """Protocol for completion notifications.
+    """Protocol for plan-level completion notifications."""
 
-    Implementations receive notification when a task completes,
-    allowing them to update state, trigger downstream tasks, etc.
-    """
-
-    def notify(self, analysis_id: int, result: ExecutionResult) -> None:
-        """Notify that a task completed.
+    def notify(
+        self,
+        plan_id: str,
+        success: bool,
+        error: Optional[str] = None,
+    ) -> None:
+        """Notify that a plan completed.
 
         Parameters
         ----------
-        analysis_id : int
-            ID of the analysis that completed.
-        result : ExecutionResult
-            Execution result with success status and any error information.
+        plan_id : str
+            ID of the plan that completed (matches :attr:`PlanHandle.plan_id`).
+        success : bool
+            Whether the plan completed successfully.
+        error : str, optional
+            Error message if the plan failed.
         """
         ...
 
 
 class CeleryCompletionCallback:
-    """Trigger a Celery task on completion.
+    """Trigger a Celery task when a plan completes.
 
-    This is the primary callback mechanism for muFlow on Celery. When a
-    task completes, it sends a Celery task to a specified queue.
-    The callback task typically has Django/database access to update
-    the TaskResult state.
+    This is the recommended callback for async (Celery) backends. On
+    completion, it dispatches a named Celery task with
+    ``(plan_id, success, error)`` as arguments.  The receiving task
+    typically has Django/database access to update records.
 
     Parameters
     ----------
     celery_app
         Celery application instance.
     task_name : str
-        Name of the Celery task to trigger on completion.
+        Name of the Celery task to call on completion.
     queue : str
-        Queue to send the callback task to. Defaults to "callbacks".
+        Queue to send the callback task to. Defaults to ``"callbacks"``.
 
     Example
     -------
-    >>> from celery import Celery
-    >>>
-    >>> app = Celery("myapp")
     >>> callback = CeleryCompletionCallback(
     ...     celery_app=app,
-    ...     task_name="topobank.analysis.tasks.on_task_complete",
+    ...     task_name="myapp.tasks.on_plan_complete",
     ...     queue="callbacks",
     ... )
-    >>>
-    >>> # When used with CeleryBackend:
-    >>> from muflow.backends.celery_backend import create_celery_task
-    >>>
-    >>> task = create_celery_task(
-    ...     celery_app=app,
-    ...     task_registry={...},
-    ...     on_complete=callback.notify,
-    ... )
+    >>> backend.submit_plan(plan, completion_callback=callback)
     """
 
     def __init__(
@@ -87,51 +81,48 @@ class CeleryCompletionCallback:
         self._task_name = task_name
         self._queue = queue
 
-    def notify(self, analysis_id: int, result: ExecutionResult) -> None:
-        """Send completion notification as a Celery task.
+    def notify(
+        self,
+        plan_id: str,
+        success: bool,
+        error: Optional[str] = None,
+    ) -> None:
+        """Dispatch the completion Celery task.
 
         Parameters
         ----------
-        analysis_id : int
-            ID of the analysis that completed.
-        result : ExecutionResult
-            Execution result.
+        plan_id : str
+            ID of the completed plan.
+        success : bool
+            Whether the plan succeeded.
+        error : str, optional
+            Error message on failure.
         """
         self._app.send_task(
             self._task_name,
-            args=[analysis_id, result.to_dict()],
+            args=[plan_id, success, error],
             queue=self._queue,
         )
         _log.debug(
-            f"Sent completion callback for analysis {analysis_id} "
+            f"Sent completion callback for plan {plan_id} "
             f"to {self._task_name} on queue {self._queue}"
         )
 
 
 class NoOpCompletionCallback:
-    """No-op callback for testing or when caller handles completion.
+    """No-op callback for testing or when completion handling is not needed."""
 
-    Use this when:
-    - Testing without callback infrastructure
-    - The caller handles completion explicitly (e.g., synchronous execution)
-    - Callbacks are not needed for the use case
-    """
-
-    def notify(self, analysis_id: int, result: ExecutionResult) -> None:
-        """Do nothing.
-
-        Parameters
-        ----------
-        analysis_id : int
-            Ignored.
-        result : ExecutionResult
-            Ignored.
-        """
+    def notify(
+        self,
+        plan_id: str,
+        success: bool,
+        error: Optional[str] = None,
+    ) -> None:
         pass
 
 
 class LoggingCompletionCallback:
-    """Log completion for debugging/testing.
+    """Log plan completion for debugging.
 
     Parameters
     ----------
@@ -142,23 +133,13 @@ class LoggingCompletionCallback:
     def __init__(self, logger: logging.Logger = None):
         self._log = logger or _log
 
-    def notify(self, analysis_id: int, result: ExecutionResult) -> None:
-        """Log the completion.
-
-        Parameters
-        ----------
-        analysis_id : int
-            ID of the analysis that completed.
-        result : ExecutionResult
-            Execution result.
-        """
-        if result.success:
-            self._log.info(
-                f"Task completed: analysis_id={analysis_id}, "
-                f"files_written={result.files_written}"
-            )
+    def notify(
+        self,
+        plan_id: str,
+        success: bool,
+        error: Optional[str] = None,
+    ) -> None:
+        if success:
+            self._log.info(f"Plan completed: plan_id={plan_id}")
         else:
-            self._log.error(
-                f"Task failed: analysis_id={analysis_id}, "
-                f"error={result.error_message}"
-            )
+            self._log.error(f"Plan failed: plan_id={plan_id}, error={error}")

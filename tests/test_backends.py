@@ -63,10 +63,10 @@ class TestLocalBackend:
 
             # Execute
             backend = LocalBackend(tmpdir, registry.get)
-            plan_id = backend.submit_plan(plan)
+            handle = backend.submit_plan(plan)
 
             # Verify
-            assert backend.get_plan_state(plan_id) == "success"
+            assert backend.get_plan_state(handle.plan_id) == "success"
             result_path = Path(tmpdir) / "node1" / "result.json"
             assert result_path.exists()
 
@@ -109,10 +109,10 @@ class TestLocalBackend:
             def on_complete(key):
                 completed_nodes.append(key)
 
-            plan_id = backend.submit_plan(plan, on_node_complete=on_complete)
+            handle = backend.submit_plan(plan, on_node_complete=on_complete)
 
             # Verify execution order
-            assert backend.get_plan_state(plan_id) == "success"
+            assert backend.get_plan_state(handle.plan_id) == "success"
             assert len(completed_nodes) == 4
 
             # Leaf nodes should complete before root
@@ -122,16 +122,21 @@ class TestLocalBackend:
                 assert leaf_idx < root_idx, "Leaf should complete before root"
 
     def test_execute_plan_with_cached_nodes(self):
-        """Should skip cached nodes."""
+        """Nodes with existing manifest.json are detected as cached at execution time."""
+        import json as _json
+
         with tempfile.TemporaryDirectory() as tmpdir:
-            # Create a pre-existing result for one node
+            # Pre-create results for one node, including manifest.json
             cached_dir = Path(tmpdir) / "cached"
             cached_dir.mkdir()
             (cached_dir / "result.json").write_text(
                 '{"id": "cached", "status": "completed"}'
             )
+            (cached_dir / "manifest.json").write_text(
+                _json.dumps({"files": ["result.json"], "timestamp": "2024-01-01T00:00:00+00:00"})
+            )
 
-            # Build plan with one cached node
+            # Build plan — no cached=True field any more; caching is detected at runtime
             cached_node = TaskNode(
                 key="cached",
                 function="test.leaf_task",
@@ -139,7 +144,6 @@ class TestLocalBackend:
                 kwargs={"id": "cached"},
                 storage_prefix=str(cached_dir),
                 depends_on=[],
-                cached=True,  # Mark as cached
             )
             new_node = TaskNode(
                 key="new",
@@ -166,18 +170,22 @@ class TestLocalBackend:
             # Execute
             backend = LocalBackend(tmpdir, registry.get)
 
-            executed_nodes = []
+            completed_nodes = []
 
             def on_complete(key):
-                executed_nodes.append(key)
+                completed_nodes.append(key)
 
-            plan_id = backend.submit_plan(plan, on_node_complete=on_complete)
+            handle = backend.submit_plan(plan, on_node_complete=on_complete)
 
-            # Verify cached node was skipped
-            assert "cached" not in executed_nodes
-            assert "new" in executed_nodes
-            assert "root" in executed_nodes
-            assert backend.get_plan_state(plan_id) == "success"
+            # All nodes complete (cached node completes instantly via manifest check)
+            assert "cached" in completed_nodes
+            assert "new" in completed_nodes
+            assert "root" in completed_nodes
+            assert backend.get_plan_state(handle.plan_id) == "success"
+
+            # Verify the cached node's original result.json was not overwritten
+            original_result = _json.loads((cached_dir / "result.json").read_text())
+            assert original_result == {"id": "cached", "status": "completed"}
 
     def test_execute_plan_with_failure(self):
         """Should handle node failure and call failure callback."""

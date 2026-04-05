@@ -33,9 +33,11 @@ import json
 import logging
 import re
 import uuid
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
+    from muflow.backends.callbacks import CompletionCallback
+    from muflow.backends.handle import PlanHandle
     from muflow.plan import TaskNode, TaskPlan
 
 _log = logging.getLogger(__name__)
@@ -118,51 +120,41 @@ class StepFunctionsBackend:
     def submit_plan(
         self,
         plan: "TaskPlan",
-        on_node_start: Optional[Callable[[str], None]] = None,
-        on_node_complete: Optional[Callable[[str], None]] = None,
-        on_node_failure: Optional[Callable[[str, str], None]] = None,
-    ) -> str:
+        completion_callback: Optional["CompletionCallback"] = None,
+    ) -> "PlanHandle":
         """Translate the plan to ASL, create a state machine, and start execution.
 
         Returns immediately with the execution ARN.  AWS Step Functions owns
         the orchestration from this point.
 
-        Node-level callbacks are not supported because execution is fully
-        async.  Use CloudWatch EventBridge rules on Step Functions state-change
-        events for equivalent notification.
+        Completion notification is not supported at the ASL level.  Use
+        :meth:`PlanHandle.get_state` polling to detect termination, or set up
+        CloudWatch EventBridge rules on Step Functions state-change events.
 
         Parameters
         ----------
         plan : TaskPlan
             Complete task plan.
-        on_node_start, on_node_complete, on_node_failure : callable, optional
-            Ignored (async execution).  A warning is logged if any are passed.
+        completion_callback : CompletionCallback, optional
+            Not supported for StepFunctionsBackend (async execution).
+            A warning is logged if provided.
 
         Returns
         -------
-        str
-            Step Functions execution ARN, or the sentinel
-            ``"cached-{root_key}"`` when every node is already cached.
+        PlanHandle
+            Handle with backend="step_functions" and plan_id=execution ARN.
         """
-        has_callbacks = any(
-            cb is not None
-            for cb in (on_node_start, on_node_complete, on_node_failure)
-        )
-        if has_callbacks:
+        from muflow.backends.handle import PlanHandle
+
+        if completion_callback is not None:
             _log.warning(
-                "StepFunctionsBackend: node callbacks are not supported "
-                "(execution is fully async).  Use CloudWatch EventBridge "
-                "on Step Functions state-change events instead."
+                "StepFunctionsBackend: completion_callback is not supported "
+                "(execution is fully async). Use PlanHandle.get_state() "
+                "polling or CloudWatch EventBridge instead."
             )
 
         levels = self._compute_levels(plan)
         asl = self._build_asl(levels, plan)
-
-        if asl is None:
-            # Every node was already cached — nothing to run.
-            _log.info(f"Plan {plan.root_key[:24]}...: all nodes cached")
-            return f"cached-{plan.root_key}"
-
         sm_name = self._state_machine_name(plan.root_key)
         sm_arn = self._ensure_state_machine(sm_name, asl)
 
@@ -178,7 +170,13 @@ class StepFunctionsBackend:
             f"Started Step Functions execution: {execution_arn} "
             f"({len(plan.nodes)} nodes)"
         )
-        return execution_arn
+        return PlanHandle(
+            backend="step_functions",
+            plan_id=execution_arn,
+            node_prefixes={k: n.storage_prefix for k, n in plan.nodes.items()},
+            storage_type="s3",
+            storage_config={"bucket": self._bucket},
+        )
 
     def get_plan_state(self, execution_arn: str) -> str:
         """Query the current state of a plan execution.
@@ -186,16 +184,13 @@ class StepFunctionsBackend:
         Parameters
         ----------
         execution_arn : str
-            ARN returned by :meth:`submit_plan`, or the ``"cached-…"`` sentinel.
+            ARN returned by :meth:`submit_plan`.
 
         Returns
         -------
         str
             One of: ``"pending"``, ``"running"``, ``"success"``, ``"failure"``.
         """
-        if execution_arn.startswith("cached-"):
-            return "success"
-
         resp = self._sfn.describe_execution(executionArn=execution_arn)
         return {
             "RUNNING": "running",
@@ -213,8 +208,6 @@ class StepFunctionsBackend:
         execution_arn : str
             ARN returned by :meth:`submit_plan`.
         """
-        if execution_arn.startswith("cached-"):
-            return
         self._sfn.stop_execution(
             executionArn=execution_arn,
             cause="Cancelled by muflow StepFunctionsBackend",
@@ -281,17 +274,16 @@ class StepFunctionsBackend:
         )
 
     def _compute_levels(self, plan: "TaskPlan") -> list[list["TaskNode"]]:
-        """Group non-cached nodes by execution level (topological sort).
+        """Group nodes by execution level (topological sort).
 
-        Level 0 contains nodes whose dependencies are all already cached or
-        have no dependencies.  Level N contains nodes whose dependencies are
-        all in levels < N.  Cached nodes are excluded from all levels.
+        Level 0 contains nodes with no dependencies.  Level N contains nodes
+        whose dependencies are all in levels < N.
 
         Raises ``ValueError`` on circular dependencies.
         """
         levels: list[list["TaskNode"]] = []
-        completed = {k for k, n in plan.nodes.items() if n.cached}
-        remaining = set(plan.nodes.keys()) - completed
+        completed: set[str] = set()
+        remaining = set(plan.nodes.keys())
 
         while remaining:
             ready = [
@@ -320,7 +312,7 @@ class StepFunctionsBackend:
         a Parallel state whose branches all run concurrently.  Levels are
         linked via ``Next`` pointers; the last level carries ``"End": true``.
 
-        Returns ``None`` when ``levels`` is empty (all nodes cached).
+        Returns ``None`` when ``levels`` is empty (empty plan).
         """
         if not levels:
             return None
@@ -466,7 +458,7 @@ def create_lambda_handler(task_registry: Optional[dict] = None):
         Returns
         -------
         dict
-            ``{"status": "success", "node_key": …, "files_written": […]}``
+            ``{"status": "success", "node_key": …}``
 
         Raises
         ------
@@ -512,10 +504,6 @@ def create_lambda_handler(task_registry: Optional[dict] = None):
         if not result.success:
             raise RuntimeError(result.error_message)
 
-        return {
-            "status": "success",
-            "node_key": node_key,
-            "files_written": result.files_written,
-        }
+        return {"status": "success", "node_key": node_key}
 
     return handler

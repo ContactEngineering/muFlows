@@ -34,8 +34,6 @@ class TaskNode(pydantic.BaseModel):
         Keys of downstream nodes waiting on this one.
     output_files : list[str]
         Filenames this node will produce (from Outputs schema).
-    cached : bool
-        True if results already exist at storage_prefix.
     analysis_id : int, optional
         Database ID of the TaskResult (set after DB record creation).
     dependency_access_map : dict[str, str]
@@ -54,7 +52,6 @@ class TaskNode(pydantic.BaseModel):
     depends_on: list[str] = []
     depended_on_by: list[str] = []
     output_files: list[str] = []
-    cached: bool = False
     analysis_id: Optional[int] = None
     dependency_access_map: dict[str, str] = {}
 
@@ -105,15 +102,9 @@ class TaskPlan(pydantic.BaseModel):
         """
         ready = []
         for node in self.nodes.values():
-            # Skip if already completed or cached
-            if node.key in completed or node.cached:
+            if node.key in completed:
                 continue
-            # Check all dependencies are satisfied
-            all_deps_ready = all(
-                dep in completed or self.nodes[dep].cached
-                for dep in node.depends_on
-            )
-            if all_deps_ready:
+            if all(dep in completed for dep in node.depends_on):
                 ready.append(node)
         return ready
 
@@ -125,10 +116,7 @@ class TaskPlan(pydantic.BaseModel):
         list[TaskNode]
             Nodes that can start immediately.
         """
-        return [
-            node for node in self.nodes.values()
-            if not node.depends_on and not node.cached
-        ]
+        return [node for node in self.nodes.values() if not node.depends_on]
 
     def is_complete(self, completed: set[str]) -> bool:
         """Check if the entire plan has completed.
@@ -141,10 +129,9 @@ class TaskPlan(pydantic.BaseModel):
         Returns
         -------
         bool
-            True if root node is complete or cached.
+            True if root node is complete.
         """
-        root = self.nodes[self.root_key]
-        return root.key in completed or root.cached
+        return self.root_key in completed
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""

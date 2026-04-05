@@ -9,8 +9,9 @@ their native primitives:
 """
 
 from muflow.backends.base import ExecutionBackend, LocalBackend
+from muflow.backends.handle import PlanHandle
 
-__all__ = ["ExecutionBackend", "LocalBackend"]
+__all__ = ["ExecutionBackend", "LocalBackend", "PlanHandle"]
 
 # StepFunctionsBackend is optional (requires boto3)
 try:

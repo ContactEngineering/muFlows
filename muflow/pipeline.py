@@ -124,7 +124,6 @@ class Pipeline:
         self,
         subject_key: str,
         kwargs: dict,
-        is_cached: Optional[Callable[[str, str, dict], bool]] = None,
         base_prefix: str = "muflow",
     ) -> TaskPlan:
         """Compile this pipeline into a :class:`TaskPlan`.
@@ -135,9 +134,6 @@ class Pipeline:
             Subject identifier (e.g. ``"tag:123"``).
         kwargs : dict
             Pipeline-level parameters, merged with per-step kwargs.
-        is_cached : callable, optional
-            ``(task_name, subject_key, kwargs) -> bool``.
-            Default: always False (no caching).
         base_prefix : str
             Base prefix for content-addressed storage paths.
 
@@ -147,7 +143,6 @@ class Pipeline:
             Complete execution DAG ready for any backend.
         """
         self._validate_step_names()
-        is_cached = is_cached or (lambda *_: False)
 
         nodes: Dict[str, TaskNode] = {}
         # step_name -> list of node keys produced by that step
@@ -158,7 +153,7 @@ class Pipeline:
         for step_name in ordered:
             step_node_keys[step_name] = self._build_step_nodes(
                 step_name, nodes, step_node_keys,
-                subject_key, kwargs, is_cached, base_prefix,
+                subject_key, kwargs, base_prefix,
             )
 
         # Compute reverse edges
@@ -186,7 +181,6 @@ class Pipeline:
         step_node_keys: Dict[str, List[str]],
         subject_key: str,
         kwargs: dict,
-        is_cached: Callable,
         base_prefix: str,
     ) -> List[str]:
         """Create TaskNodes for a single pipeline step.
@@ -242,7 +236,6 @@ class Pipeline:
                 depends_on=list(upstream_keys),
                 depended_on_by=[],
                 output_files=output_files,
-                cached=is_cached(task_name, subject_key, merged_kwargs),
                 dependency_access_map=dict(dep_access_map),
             )
             nodes[storage_prefix] = node
@@ -342,7 +335,6 @@ class Pipeline:
             storage_prefix=sentinel_key,
             depends_on=list(last_keys),
             depended_on_by=[],
-            cached=False,
             dependency_access_map={},
         )
         nodes[sentinel_key] = sentinel

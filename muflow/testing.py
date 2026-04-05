@@ -93,7 +93,6 @@ def run_plan_locally(
     kwargs: dict,
     output_dir: Union[str, Path],
     verbose: bool = False,
-    use_cache: bool = True,
 ) -> LocalExecutionResult:
     """Run a pipeline with all steps computed automatically.
 
@@ -101,6 +100,9 @@ def run_plan_locally(
     1. Builds a complete execution plan from a Pipeline
     2. Executes all nodes using LocalBackend
     3. Returns the result with easy access to outputs
+
+    Caching is automatic: tasks whose results already exist (``manifest.json``
+    present) are detected at execution time and skipped without re-running.
 
     Parameters
     ----------
@@ -114,8 +116,6 @@ def run_plan_locally(
         Directory for all task outputs.
     verbose : bool
         If True, print progress messages.
-    use_cache : bool
-        If True (default), skip execution of tasks that have cached results.
 
     Returns
     -------
@@ -138,7 +138,6 @@ def run_plan_locally(
     ...     print(f"Plan has {len(result.plan.nodes)} nodes")
     """
     from muflow.backends import LocalBackend
-    from muflow.storage import LocalStorageBackend
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -148,11 +147,9 @@ def run_plan_locally(
         print(f"Planning {pipeline.name}...")
 
     base_path = str(output_dir.absolute())
-    is_cached = LocalStorageBackend.make_cache_checker(base_path) if use_cache else None
     plan = pipeline.build_plan(
         subject_key=subject_key,
         kwargs=kwargs,
-        is_cached=is_cached,
         base_prefix=base_path,
     )
 
