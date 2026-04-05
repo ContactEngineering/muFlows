@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from muflow.plan import WorkflowNode, WorkflowPlan
+from muflow.plan import TaskNode, TaskPlan
 
 celery_pkg = pytest.importorskip("celery", reason="celery required")
 
@@ -122,54 +122,54 @@ class TestComputeLevels:
         assert levels[2][0].function == "test.d"
 
 
-# ── TestBuildCeleryWorkflow ──────────────────────────────────────────────────
+# ── TestBuildCeleryTask ──────────────────────────────────────────────────
 
 
-class TestBuildCeleryWorkflow:
+class TestBuildCeleryTask:
     def test_single_level_returns_group(self, backend):
         plan = fan_in_plan()
         levels = backend._compute_levels(plan)
         # Only take level 0 (3 leaves)
-        workflow = backend._build_celery_workflow([levels[0]], plan)
+        task = backend._build_celery_task([levels[0]], plan)
         from celery.canvas import group
 
-        assert isinstance(workflow, group)
+        assert isinstance(task, group)
 
     def test_single_node_level_returns_group(self, backend):
         plan = simple_plan()
         levels = backend._compute_levels(plan)
-        workflow = backend._build_celery_workflow(levels, plan)
+        task = backend._build_celery_task(levels, plan)
         from celery.canvas import group
 
-        assert isinstance(workflow, group)
+        assert isinstance(task, group)
 
     def test_two_levels_returns_chord(self, backend):
         plan = linear_plan()
         levels = backend._compute_levels(plan)
-        workflow = backend._build_celery_workflow(levels, plan)
+        task = backend._build_celery_task(levels, plan)
         from celery.canvas import chord
 
-        assert isinstance(workflow, chord)
+        assert isinstance(task, chord)
 
     def test_three_levels_is_nested_chord(self, backend):
         plan = diamond_plan()
         levels = backend._compute_levels(plan)
-        workflow = backend._build_celery_workflow(levels, plan)
+        task = backend._build_celery_task(levels, plan)
         from celery.canvas import chord
 
-        assert isinstance(workflow, chord)
+        assert isinstance(task, chord)
 
     def test_all_cached_returns_none(self, backend):
         plan = all_cached_plan()
         levels = backend._compute_levels(plan)
-        workflow = backend._build_celery_workflow(levels, plan)
-        assert workflow is None
+        task = backend._build_celery_task(levels, plan)
+        assert task is None
 
     def test_cached_nodes_excluded_from_groups(self, backend):
         """Mixed level: cached nodes not in group."""
         # Create a plan where one leaf is cached, two are not
         leaves = [
-            WorkflowNode(
+            TaskNode(
                 key=f"muflow/test.leaf/l{i}",
                 function="test.leaf",
                 subject_key=f"sub:{i}",
@@ -179,7 +179,7 @@ class TestBuildCeleryWorkflow:
             )
             for i in range(3)
         ]
-        root = WorkflowNode(
+        root = TaskNode(
             key="muflow/test.root/rrr",
             function="test.root",
             subject_key="sub:all",
@@ -189,12 +189,12 @@ class TestBuildCeleryWorkflow:
         )
         nodes = {n.key: n for n in leaves}
         nodes[root.key] = root
-        plan = WorkflowPlan(nodes=nodes, root_key=root.key)
+        plan = TaskPlan(nodes=nodes, root_key=root.key)
 
         levels = backend._compute_levels(plan)
-        workflow = backend._build_celery_workflow(levels, plan)
+        task = backend._build_celery_task(levels, plan)
         # Level 0 should have 2 tasks (not 3), level 1 should have 1
-        assert workflow is not None
+        assert task is not None
 
 
 # ── TestMakeNodeTask ─────────────────────────────────────────────────────────
@@ -218,7 +218,7 @@ class TestMakeNodeTask:
         node = plan.nodes["muflow/test.simple/aaa"]
         sig = backend._make_node_task(node, plan)
         payload_dict = sig.args[1]
-        assert "workflow_name" in payload_dict
+        assert "task_name" in payload_dict
         assert "kwargs" in payload_dict
         assert "storage_prefix" in payload_dict
         assert "dependency_prefixes" in payload_dict
@@ -342,7 +342,7 @@ class TestSubmitPlanEager:
             test_registry = {}
             create_celery_task(
                 celery_app,
-                workflow_registry=test_registry,
+                task_registry=test_registry,
                 task_name=task_name,
             )
             backend = CeleryBackend(
@@ -354,21 +354,21 @@ class TestSubmitPlanEager:
             yield backend, test_registry, s3
 
     def _register_noop(self, registry, name="test.simple"):
-        from muflow.registry import WorkflowEntry
+        from muflow.registry import TaskEntry
 
         def noop(ctx):
             ctx.save_json("output.json", {"status": "ok"})
 
-        entry = WorkflowEntry(name=name, fn=noop)
+        entry = TaskEntry(name=name, fn=noop)
         registry[name] = entry
 
     def _register_failing(self, registry, name="test.fail"):
-        from muflow.registry import WorkflowEntry
+        from muflow.registry import TaskEntry
 
         def fail(ctx):
             raise RuntimeError("intentional failure")
 
-        entry = WorkflowEntry(name=name, fn=fail)
+        entry = TaskEntry(name=name, fn=fail)
         registry[name] = entry
 
     def test_single_node_returns_plan_id(self, s3_env):
@@ -392,13 +392,13 @@ class TestSubmitPlanEager:
         plan_id = backend.submit_plan(plan)
         assert backend.get_plan_state(plan_id) == "success"
 
-    def test_workflow_output_written_to_s3(self, s3_env):
+    def test_task_output_written_to_s3(self, s3_env):
         backend, registry, s3 = s3_env
         self._register_noop(registry)
         plan = simple_plan()
         backend.submit_plan(plan)
 
-        # Check that the workflow wrote output.json to S3
+        # Check that the task wrote output.json to S3
         prefix = "muflow/test.simple/aaa"
         resp = s3.list_objects_v2(Bucket="test-bucket", Prefix=prefix)
         keys = [obj["Key"] for obj in resp.get("Contents", [])]
@@ -418,7 +418,7 @@ class TestSubmitPlanEager:
         output_keys = [k for k in keys if "output.json" in k]
         assert len(output_keys) == 4
 
-    def test_failed_workflow_raises(self, s3_env):
+    def test_failed_task_raises(self, s3_env):
         backend, registry, s3 = s3_env
         self._register_failing(registry, name="test.simple")
         plan = simple_plan()
@@ -440,7 +440,7 @@ class TestCreateCeleryTask:
             test_registry = {}
             task = create_celery_task(
                 celery_app,
-                workflow_registry=test_registry,
+                task_registry=test_registry,
                 task_name="muflow.execute_node",
             )
             yield task, test_registry, s3
@@ -448,7 +448,7 @@ class TestCreateCeleryTask:
     def test_task_registered_with_name(self, celery_app):
         create_celery_task(
             celery_app,
-            workflow_registry={},
+            task_registry={},
             task_name="muflow.execute_node",
         )
         assert "muflow.execute_node" in celery_app.tasks
@@ -456,33 +456,33 @@ class TestCreateCeleryTask:
     def test_custom_task_name(self, celery_app):
         create_celery_task(
             celery_app,
-            workflow_registry={},
+            task_registry={},
             task_name="custom.task.name",
         )
         assert "custom.task.name" in celery_app.tasks
 
-    def test_unknown_workflow_raises_value_error(self, task_env):
+    def test_unknown_task_raises_value_error(self, task_env):
         task, registry, s3 = task_env
         payload_dict = {
-            "workflow_name": "nonexistent.workflow",
+            "task_name": "nonexistent.task",
             "kwargs": {},
             "storage_prefix": "muflow/test/aaa",
             "dependency_prefixes": {},
         }
-        with pytest.raises(ValueError, match="Unknown workflow"):
+        with pytest.raises(ValueError, match="Unknown task"):
             task("node-key", payload_dict, "test-bucket")
 
-    def test_known_workflow_executes(self, task_env):
+    def test_known_task_executes(self, task_env):
         task, registry, s3 = task_env
-        from muflow.registry import WorkflowEntry
+        from muflow.registry import TaskEntry
 
         def noop(ctx):
             ctx.save_json("result.json", {"done": True})
 
-        registry["test.wf"] = WorkflowEntry(name="test.wf", fn=noop)
+        registry["test.wf"] = TaskEntry(name="test.wf", fn=noop)
 
         payload_dict = {
-            "workflow_name": "test.wf",
+            "task_name": "test.wf",
             "kwargs": {},
             "storage_prefix": "muflow/test.wf/aaa",
             "dependency_prefixes": {},
@@ -492,15 +492,15 @@ class TestCreateCeleryTask:
 
     def test_execution_result_json_written(self, task_env):
         task, registry, s3 = task_env
-        from muflow.registry import WorkflowEntry
+        from muflow.registry import TaskEntry
 
         def noop(ctx):
             ctx.save_json("out.json", {})
 
-        registry["test.wf"] = WorkflowEntry(name="test.wf", fn=noop)
+        registry["test.wf"] = TaskEntry(name="test.wf", fn=noop)
 
         payload_dict = {
-            "workflow_name": "test.wf",
+            "task_name": "test.wf",
             "kwargs": {},
             "storage_prefix": "muflow/test.wf/bbb",
             "dependency_prefixes": {},
@@ -513,17 +513,17 @@ class TestCreateCeleryTask:
         keys = [obj["Key"] for obj in resp.get("Contents", [])]
         assert any("_execution_result.json" in k for k in keys)
 
-    def test_failed_workflow_raises_runtime_error(self, task_env):
+    def test_failed_task_raises_runtime_error(self, task_env):
         task, registry, s3 = task_env
-        from muflow.registry import WorkflowEntry
+        from muflow.registry import TaskEntry
 
         def fail(ctx):
             raise RuntimeError("boom")
 
-        registry["test.fail"] = WorkflowEntry(name="test.fail", fn=fail)
+        registry["test.fail"] = TaskEntry(name="test.fail", fn=fail)
 
         payload_dict = {
-            "workflow_name": "test.fail",
+            "task_name": "test.fail",
             "kwargs": {},
             "storage_prefix": "muflow/test.fail/ccc",
             "dependency_prefixes": {},

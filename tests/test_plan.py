@@ -1,10 +1,10 @@
-"""Tests for WorkflowPlan and related functions."""
+"""Tests for TaskPlan and related functions."""
 
 import json
 
 import pytest
 
-from muflow import WorkflowNode, WorkflowPlan, compute_prefix
+from muflow import TaskNode, TaskPlan, compute_prefix
 
 
 class TestComputePrefix:
@@ -13,7 +13,7 @@ class TestComputePrefix:
     def test_deterministic(self):
         """Same inputs should produce same prefix."""
         hash_dict = {
-            "workflow": "my.workflow",
+            "task": "my.task",
             "subject": "subject:123",
             "param": "value",
         }
@@ -23,74 +23,74 @@ class TestComputePrefix:
 
     def test_different_function_different_prefix(self):
         """Different function names should produce different prefixes."""
-        prefix1 = compute_prefix({"workflow": "workflow.a", "subject": "subject:123"})
-        prefix2 = compute_prefix({"workflow": "workflow.b", "subject": "subject:123"})
+        prefix1 = compute_prefix({"task": "task.a", "subject": "subject:123"})
+        prefix2 = compute_prefix({"task": "task.b", "subject": "subject:123"})
         assert prefix1 != prefix2
 
     def test_different_subject_different_prefix(self):
         """Different subjects should produce different prefixes."""
-        prefix1 = compute_prefix({"workflow": "my.workflow", "subject": "subject:123"})
-        prefix2 = compute_prefix({"workflow": "my.workflow", "subject": "subject:456"})
+        prefix1 = compute_prefix({"task": "my.task", "subject": "subject:123"})
+        prefix2 = compute_prefix({"task": "my.task", "subject": "subject:456"})
         assert prefix1 != prefix2
 
     def test_different_kwargs_different_prefix(self):
         """Different kwargs should produce different prefixes."""
         prefix1 = compute_prefix(
-            {"workflow": "my.workflow", "subject": "subject:123", "a": 1}
+            {"task": "my.task", "subject": "subject:123", "a": 1}
         )
         prefix2 = compute_prefix(
-            {"workflow": "my.workflow", "subject": "subject:123", "a": 2}
+            {"task": "my.task", "subject": "subject:123", "a": 2}
         )
         assert prefix1 != prefix2
 
     def test_kwargs_order_independent(self):
         """Kwargs order should not affect prefix."""
         prefix1 = compute_prefix(
-            {"workflow": "my.workflow", "subject": "subject:123", "a": 1, "b": 2}
+            {"task": "my.task", "subject": "subject:123", "a": 1, "b": 2}
         )
         prefix2 = compute_prefix(
-            {"workflow": "my.workflow", "subject": "subject:123", "b": 2, "a": 1}
+            {"task": "my.task", "subject": "subject:123", "b": 2, "a": 1}
         )
         assert prefix1 == prefix2
 
     def test_includes_function_name(self):
         """Prefix should include function name for readability."""
         prefix = compute_prefix(
-            {"workflow": "sds_ml.v3.gpr.training", "subject": "tag:1"}
+            {"task": "sds_ml.v3.gpr.training", "subject": "tag:1"}
         )
         assert "sds_ml.v3.gpr.training" in prefix
 
     def test_custom_base_prefix(self):
         """Should support custom base prefix."""
         prefix = compute_prefix(
-            {"workflow": "my.workflow", "subject": "subject:123"},
+            {"task": "my.task", "subject": "subject:123"},
             base_prefix="custom/prefix",
         )
         assert prefix.startswith("custom/prefix/")
 
 
-class TestWorkflowNode:
-    """Tests for WorkflowNode dataclass."""
+class TestTaskNode:
+    """Tests for TaskNode dataclass."""
 
     def test_creation(self):
         """Should create node with required fields."""
-        node = WorkflowNode(
+        node = TaskNode(
             key="test/node",
-            function="my.workflow",
+            function="my.task",
             subject_key="subject:123",
             kwargs={"param": "value"},
-            storage_prefix="data-lake/results/my.workflow/abc123",
+            storage_prefix="data-lake/results/my.task/abc123",
         )
         assert node.key == "test/node"
-        assert node.function == "my.workflow"
+        assert node.function == "my.task"
         assert node.depends_on == []
         assert node.cached is False
 
     def test_to_dict(self):
         """Should serialize to dict."""
-        node = WorkflowNode(
+        node = TaskNode(
             key="test/node",
-            function="my.workflow",
+            function="my.task",
             subject_key="subject:123",
             kwargs={"param": "value"},
             storage_prefix="prefix",
@@ -98,14 +98,14 @@ class TestWorkflowNode:
         )
         d = node.to_dict()
         assert d["key"] == "test/node"
-        assert d["function"] == "my.workflow"
+        assert d["function"] == "my.task"
         assert d["output_files"] == ["result.json"]
 
     def test_from_dict(self):
         """Should deserialize from dict."""
         d = {
             "key": "test/node",
-            "function": "my.workflow",
+            "function": "my.task",
             "subject_key": "subject:123",
             "kwargs": {"param": "value"},
             "storage_prefix": "prefix",
@@ -115,41 +115,41 @@ class TestWorkflowNode:
             "cached": True,
             "analysis_id": 42,
         }
-        node = WorkflowNode.from_dict(d)
+        node = TaskNode.from_dict(d)
         assert node.key == "test/node"
         assert node.depends_on == ["dep1"]
         assert node.cached is True
         assert node.analysis_id == 42
 
 
-class TestWorkflowPlan:
-    """Tests for WorkflowPlan."""
+class TestTaskPlan:
+    """Tests for TaskPlan."""
 
     @pytest.fixture
     def simple_plan(self):
         """Create a simple plan with 3 nodes: A -> B -> C."""
         nodes = {
-            "A": WorkflowNode(
+            "A": TaskNode(
                 key="A",
-                function="workflow.a",
+                function="task.a",
                 subject_key="s1",
                 kwargs={},
                 storage_prefix="prefix/a",
                 depends_on=[],
                 depended_on_by=["B"],
             ),
-            "B": WorkflowNode(
+            "B": TaskNode(
                 key="B",
-                function="workflow.b",
+                function="task.b",
                 subject_key="s1",
                 kwargs={},
                 storage_prefix="prefix/b",
                 depends_on=["A"],
                 depended_on_by=["C"],
             ),
-            "C": WorkflowNode(
+            "C": TaskNode(
                 key="C",
-                function="workflow.c",
+                function="task.c",
                 subject_key="s1",
                 kwargs={},
                 storage_prefix="prefix/c",
@@ -157,51 +157,51 @@ class TestWorkflowPlan:
                 depended_on_by=[],
             ),
         }
-        return WorkflowPlan(nodes=nodes, root_key="C")
+        return TaskPlan(nodes=nodes, root_key="C")
 
     @pytest.fixture
     def fan_out_plan(self):
         """Create a plan with fan-out: A -> [B1, B2, B3] -> C."""
         nodes = {
-            "A": WorkflowNode(
+            "A": TaskNode(
                 key="A",
-                function="workflow.a",
+                function="task.a",
                 subject_key="s1",
                 kwargs={},
                 storage_prefix="prefix/a",
                 depends_on=[],
                 depended_on_by=["B1", "B2", "B3"],
             ),
-            "B1": WorkflowNode(
+            "B1": TaskNode(
                 key="B1",
-                function="workflow.b",
+                function="task.b",
                 subject_key="s1",
                 kwargs={"fold": 1},
                 storage_prefix="prefix/b1",
                 depends_on=["A"],
                 depended_on_by=["C"],
             ),
-            "B2": WorkflowNode(
+            "B2": TaskNode(
                 key="B2",
-                function="workflow.b",
+                function="task.b",
                 subject_key="s1",
                 kwargs={"fold": 2},
                 storage_prefix="prefix/b2",
                 depends_on=["A"],
                 depended_on_by=["C"],
             ),
-            "B3": WorkflowNode(
+            "B3": TaskNode(
                 key="B3",
-                function="workflow.b",
+                function="task.b",
                 subject_key="s1",
                 kwargs={"fold": 3},
                 storage_prefix="prefix/b3",
                 depends_on=["A"],
                 depended_on_by=["C"],
             ),
-            "C": WorkflowNode(
+            "C": TaskNode(
                 key="C",
-                function="workflow.c",
+                function="task.c",
                 subject_key="s1",
                 kwargs={},
                 storage_prefix="prefix/c",
@@ -209,7 +209,7 @@ class TestWorkflowPlan:
                 depended_on_by=[],
             ),
         }
-        return WorkflowPlan(nodes=nodes, root_key="C")
+        return TaskPlan(nodes=nodes, root_key="C")
 
     def test_leaf_nodes(self, simple_plan):
         """leaf_nodes() should return nodes with no dependencies."""
@@ -290,15 +290,15 @@ class TestWorkflowPlan:
     def test_from_dict(self, simple_plan):
         """Should deserialize from dict."""
         d = simple_plan.to_dict()
-        plan = WorkflowPlan.from_dict(d)
+        plan = TaskPlan.from_dict(d)
         assert plan.root_key == "C"
         assert len(plan.nodes) == 3
-        assert plan.nodes["A"].function == "workflow.a"
+        assert plan.nodes["A"].function == "task.a"
 
     def test_to_json_and_back(self, simple_plan):
         """Should round-trip through JSON."""
         json_str = simple_plan.to_json()
-        plan = WorkflowPlan.from_json(json_str)
+        plan = TaskPlan.from_json(json_str)
         assert plan.root_key == simple_plan.root_key
         assert len(plan.nodes) == len(simple_plan.nodes)
 

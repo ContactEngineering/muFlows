@@ -4,7 +4,8 @@
 
 ### Breaking changes
 
-- Removed `WorkflowContextProtocol`. Use `WorkflowContext` directly instead.
+- Renamed "workflow" to "task" across the entire codebase (`Workflow` -> `Task`, `@register_workflow` -> `@register_task`, etc.).
+- Removed `TaskContextProtocol`. Use `TaskContext` directly instead.
 
 ## v0.1.0 (2026-04-04)
 
@@ -12,15 +13,15 @@ Initial release.
 
 ### Features
 
-- **Workflow registry**: `@register_workflow` decorator for registering pure
-  workflow functions with optional Pydantic parameter validation
+- **Task registry**: `@register_task` decorator for registering pure
+  task functions with optional Pydantic parameter validation
 - **Pipeline abstraction**: `Pipeline`, `Step`, and `ForEach` for declarative
   multi-step DAG definitions
-- **WorkflowPlan**: Static, serializable DAG representation compiled from
+- **TaskPlan**: Static, serializable DAG representation compiled from
   pipelines via topological sort
 - **Content-addressed storage**: Deterministic prefix computation with
   `IdentityKey` annotations for cache control
-- **WorkflowContext**: Unified file I/O interface (JSON, xarray, raw bytes)
+- **TaskContext**: Unified file I/O interface (JSON, xarray, raw bytes)
   with dependency access and progress reporting
 
 ### Execution backends

@@ -91,7 +91,7 @@ class TestBuildASL:
         asl = backend._build_asl(levels, plan)
 
         payload = asl["States"]["Level0"]["Parameters"]["Payload"]
-        assert payload["workflow_name"] == "test.simple"
+        assert payload["task_name"] == "test.simple"
         assert payload["storage_prefix"] == "muflow/test.simple/aaa"
         assert payload["bucket"] == BUCKET
         assert payload["node_key"] == "muflow/test.simple/aaa"
@@ -173,12 +173,12 @@ class TestStateMachineName:
 
     def test_uses_hash_suffix(self):
         backend = self._make_backend()
-        name = backend._state_machine_name("muflow/my.workflow/abc123def456")
+        name = backend._state_machine_name("muflow/my.task/abc123def456")
         assert name == "muflow-abc123def456"
 
     def test_sanitises_special_chars(self):
         backend = self._make_backend()
-        name = backend._state_machine_name("muflow/my.workflow/a.b:c/d")
+        name = backend._state_machine_name("muflow/my.task/a.b:c/d")
         assert all(c.isalnum() or c in "-_" for c in name)
 
     def test_max_80_chars(self):

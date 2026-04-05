@@ -1,7 +1,7 @@
 """Base execution backend protocol and local implementation.
 
-ExecutionBackend is the protocol for submitting workflow plans for execution.
-Backends receive an entire WorkflowPlan and orchestrate it using their native
+ExecutionBackend is the protocol for submitting task plans for execution.
+Backends receive an entire TaskPlan and orchestrate it using their native
 primitives (Celery chord, Step Functions, serial loop, etc.).
 """
 
@@ -11,24 +11,24 @@ import logging
 from typing import TYPE_CHECKING, Callable, Optional, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from muflow.plan import WorkflowPlan
+    from muflow.plan import TaskPlan
 
 _log = logging.getLogger(__name__)
 
 
 @runtime_checkable
 class ExecutionBackend(Protocol):
-    """Protocol for workflow plan execution backends.
+    """Protocol for task plan execution backends.
 
     An execution backend knows how to:
-    - Execute an entire workflow plan (DAG)
+    - Execute an entire task plan (DAG)
     - Orchestrate parallelism using its native primitives
     - Track and report plan state
 
     Backends handle:
     - DAG traversal and dependency management
     - Parallel execution where possible
-    - Node-level execution via execute_workflow()
+    - Node-level execution via execute_task()
 
     Implementations:
     - LocalBackend: Executes serially in-process (for testing/CLI)
@@ -38,12 +38,12 @@ class ExecutionBackend(Protocol):
 
     def submit_plan(
         self,
-        plan: "WorkflowPlan",
+        plan: "TaskPlan",
         on_node_start: Optional[Callable[[str], None]] = None,
         on_node_complete: Optional[Callable[[str], None]] = None,
         on_node_failure: Optional[Callable[[str, str], None]] = None,
     ) -> str:
-        """Submit an entire workflow plan for execution.
+        """Submit an entire task plan for execution.
 
         The backend orchestrates the DAG using its native primitives.
         For async backends (Celery, Lambda), this returns immediately.
@@ -51,8 +51,8 @@ class ExecutionBackend(Protocol):
 
         Parameters
         ----------
-        plan : WorkflowPlan
-            Complete workflow plan with all nodes and dependencies.
+        plan : TaskPlan
+            Complete task plan with all nodes and dependencies.
         on_node_start : callable, optional
             Callback when a node starts: (node_key) -> None
         on_node_complete : callable, optional
@@ -102,9 +102,9 @@ class LocalBackend:
     Parameters
     ----------
     base_path : str
-        Base directory for workflow storage.
+        Base directory for task storage.
     registry_get : callable, optional
-        Function to get workflow entries: (name) -> WorkflowEntry
+        Function to get task entries: (name) -> TaskEntry
         Defaults to `muflow.registry.get`.
     progress_reporter : callable, optional
         Function called with (current, total, message) for progress updates.
@@ -135,9 +135,9 @@ class LocalBackend:
         Parameters
         ----------
         base_path : str
-            Base directory for workflow storage.
+            Base directory for task storage.
         registry_get : callable, optional
-            Function to get workflow entries by name.
+            Function to get task entries by name.
             Defaults to `muflow.registry.get`.
         progress_reporter : callable, optional
             Function called with (current, total, message) for progress updates.
@@ -152,7 +152,7 @@ class LocalBackend:
 
     def submit_plan(
         self,
-        plan: "WorkflowPlan",
+        plan: "TaskPlan",
         on_node_start: Optional[Callable[[str], None]] = None,
         on_node_complete: Optional[Callable[[str], None]] = None,
         on_node_failure: Optional[Callable[[str, str], None]] = None,
@@ -164,8 +164,8 @@ class LocalBackend:
 
         Parameters
         ----------
-        plan : WorkflowPlan
-            Complete workflow plan.
+        plan : TaskPlan
+            Complete task plan.
         on_node_start : callable, optional
             Callback when a node starts execution.
         on_node_complete : callable, optional
@@ -183,7 +183,7 @@ class LocalBackend:
         RuntimeError
             If any node fails during execution.
         """
-        from muflow import ExecutionPayload, create_local_context, execute_workflow
+        from muflow import ExecutionPayload, create_local_context, execute_task
 
         plan_id = plan.root_key
         self._plan_states[plan_id] = "running"
@@ -223,14 +223,14 @@ class LocalBackend:
 
                     # Build payload
                     payload = ExecutionPayload(
-                        workflow_name=node.function,
+                        task_name=node.function,
                         kwargs=node.kwargs,
                         storage_prefix=node.storage_prefix,
                         dependency_prefixes=dependency_paths,
                     )
 
                     # Execute
-                    result = execute_workflow(payload, ctx, self.registry_get)
+                    result = execute_task(payload, ctx, self.registry_get)
 
                     if result.success:
                         completed.add(node.key)

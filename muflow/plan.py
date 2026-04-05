@@ -1,8 +1,8 @@
-"""Workflow plan data structures.
+"""Task plan data structures.
 
-A WorkflowPlan represents a complete, static execution DAG. It is computed
+A TaskPlan represents a complete, static execution DAG. It is computed
 once upfront and stored as JSON. The plan contains all information needed
-to execute the workflow on any backend.
+to execute the task on any backend.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Optional
 import pydantic
 
 
-class WorkflowNode(pydantic.BaseModel):
+class TaskNode(pydantic.BaseModel):
     """A single node in the execution plan.
 
     Attributes
@@ -21,11 +21,11 @@ class WorkflowNode(pydantic.BaseModel):
         Unique identifier within the plan. Typically derived from
         function name, subject, and kwargs.
     function : str
-        Workflow function name (e.g., "sds_ml.v3.gpr.training").
+        Task function name (e.g., "sds_ml.v3.gpr.training").
     subject_key : str
         Identifier for the subject (e.g., S3 key or "tag:123").
     kwargs : dict
-        Parameters passed to the workflow.
+        Parameters passed to the task.
     storage_prefix : str
         Content-addressed S3 key prefix for output files.
     depends_on : list[str]
@@ -37,11 +37,11 @@ class WorkflowNode(pydantic.BaseModel):
     cached : bool
         True if results already exist at storage_prefix.
     analysis_id : int, optional
-        Database ID of the WorkflowResult (set after DB record creation).
+        Database ID of the TaskResult (set after DB record creation).
     dependency_access_map : dict[str, str]
         Mapping from access key (e.g., ``"features:0"``) to storage prefix.
-        Populated at plan-build time by the Pipeline or WorkflowPlanner.
-        Used by backends to set up ``WorkflowContext`` with dependency storages.
+        Populated at plan-build time by the Pipeline or TaskPlanner.
+        Used by backends to set up ``TaskContext`` with dependency storages.
     """
 
     model_config = pydantic.ConfigDict(extra="forbid")
@@ -63,15 +63,15 @@ class WorkflowNode(pydantic.BaseModel):
         return self.model_dump(mode="json")
 
     @classmethod
-    def from_dict(cls, data: dict) -> WorkflowNode:
+    def from_dict(cls, data: dict) -> TaskNode:
         """Create from dictionary."""
         return cls.model_validate(data)
 
 
-class WorkflowPlan(pydantic.BaseModel):
+class TaskPlan(pydantic.BaseModel):
     """A complete, static execution DAG.
 
-    The plan is computed once by the WorkflowPlanner and stored as JSON.
+    The plan is computed once by the TaskPlanner and stored as JSON.
     It contains all information needed to:
     - Create write-ahead database records
     - Submit nodes to execution backends
@@ -79,7 +79,7 @@ class WorkflowPlan(pydantic.BaseModel):
 
     Attributes
     ----------
-    nodes : dict[str, WorkflowNode]
+    nodes : dict[str, TaskNode]
         All nodes in the plan, keyed by their unique key.
     root_key : str
         Key of the root node (the one the user requested).
@@ -87,10 +87,10 @@ class WorkflowPlan(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(extra="forbid")
 
-    nodes: dict[str, WorkflowNode]
+    nodes: dict[str, TaskNode]
     root_key: str
 
-    def ready_nodes(self, completed: set[str]) -> list[WorkflowNode]:
+    def ready_nodes(self, completed: set[str]) -> list[TaskNode]:
         """Get nodes whose dependencies are all satisfied.
 
         Parameters
@@ -100,7 +100,7 @@ class WorkflowPlan(pydantic.BaseModel):
 
         Returns
         -------
-        list[WorkflowNode]
+        list[TaskNode]
             Nodes ready to execute.
         """
         ready = []
@@ -117,12 +117,12 @@ class WorkflowPlan(pydantic.BaseModel):
                 ready.append(node)
         return ready
 
-    def leaf_nodes(self) -> list[WorkflowNode]:
+    def leaf_nodes(self) -> list[TaskNode]:
         """Get nodes with no dependencies (starting points).
 
         Returns
         -------
-        list[WorkflowNode]
+        list[TaskNode]
             Nodes that can start immediately.
         """
         return [
@@ -155,11 +155,11 @@ class WorkflowPlan(pydantic.BaseModel):
         return self.model_dump_json()
 
     @classmethod
-    def from_dict(cls, data: dict) -> WorkflowPlan:
+    def from_dict(cls, data: dict) -> TaskPlan:
         """Create from dictionary."""
         return cls.model_validate(data)
 
     @classmethod
-    def from_json(cls, s: str) -> WorkflowPlan:
+    def from_json(cls, s: str) -> TaskPlan:
         """Deserialize from JSON string."""
         return cls.model_validate_json(s)

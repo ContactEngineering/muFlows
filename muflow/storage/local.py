@@ -56,11 +56,11 @@ class LocalStorageBackend:
     def is_result_cached(
         cls,
         base_path: Union[str, Path],
-        workflow_name: str,
+        task_name: str,
         subject_key: str,
         kwargs: dict,
     ) -> bool:
-        """Check if a workflow result is cached at the given base path.
+        """Check if a task result is cached at the given base path.
 
         This class method checks for the existence of a ``manifest.json``
         file at the content-addressed storage location without instantiating
@@ -69,13 +69,13 @@ class LocalStorageBackend:
         Parameters
         ----------
         base_path : str or Path
-            Base directory for workflow storage.
-        workflow_name : str
-            Name of the workflow.
+            Base directory for task storage.
+        task_name : str
+            Name of the task.
         subject_key : str
             Subject identifier.
         kwargs : dict
-            Workflow parameters.
+            Task parameters.
 
         Returns
         -------
@@ -84,10 +84,10 @@ class LocalStorageBackend:
         """
         from muflow.registry import get as get_entry
 
-        entry = get_entry(workflow_name)
+        entry = get_entry(task_name)
         identity_keys = entry.identity_keys if entry else None
 
-        hash_dict = {"workflow": workflow_name, "subject": subject_key, **kwargs}
+        hash_dict = {"task": task_name, "subject": subject_key, **kwargs}
         prefix = compute_prefix(
             hash_dict, base_prefix=str(base_path), identity_keys=identity_keys
         )
@@ -100,12 +100,12 @@ class LocalStorageBackend:
         Parameters
         ----------
         base_path : str or Path
-            Base directory for workflow storage.
+            Base directory for task storage.
 
         Returns
         -------
         callable
-            Function with signature ``(workflow_name, subject_key, kwargs) -> bool``
+            Function with signature ``(task_name, subject_key, kwargs) -> bool``
             suitable for passing to ``Pipeline.build_plan(is_cached=...)``.
 
         Example
@@ -117,8 +117,8 @@ class LocalStorageBackend:
         """
         base_path = str(base_path)
 
-        def is_cached(workflow_name: str, subject_key: str, kwargs: dict) -> bool:
-            return cls.is_result_cached(base_path, workflow_name, subject_key, kwargs)
+        def is_cached(task_name: str, subject_key: str, kwargs: dict) -> bool:
+            return cls.is_result_cached(base_path, task_name, subject_key, kwargs)
 
         return is_cached
 
@@ -149,7 +149,7 @@ class LocalStorageBackend:
             )
         if filename not in self._allowed_outputs:
             raise PermissionError(
-                f"Workflow attempted to write '{filename}' but only "
+                f"Task attempted to write '{filename}' but only "
                 f"{sorted(self._allowed_outputs)} are declared in outputs"
             )
 

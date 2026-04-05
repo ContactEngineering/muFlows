@@ -1,22 +1,22 @@
-"""Workflow registry.
+"""Task registry.
 
-Workflows are registered as plain functions using ``@register_workflow``.
+Tasks are registered as plain functions using ``@register_task``.
 DAG topology is declared separately via :class:`~muflow.pipeline.Pipeline`.
 
 Example
 -------
->>> from muflow.registry import register_workflow
+>>> from muflow.registry import register_task
 >>> import pydantic
 >>>
 >>> class MyParams(pydantic.BaseModel):
 ...     threshold: float = 0.5
 >>>
->>> @register_workflow(
-...     name="myapp.my_workflow",
-...     display_name="My Workflow",
+>>> @register_task(
+...     name="myapp.my_task",
+...     display_name="My Task",
 ...     parameters=MyParams,
 ... )
-... def my_workflow(context):
+... def my_task(context):
 ...     return {"result": "done"}
 """
 
@@ -27,25 +27,25 @@ from typing import Callable, Dict, List, Optional, Type
 
 import pydantic
 
-# ── WorkflowEntry ──────────────────────────────────────────────────────────
+# ── TaskEntry ──────────────────────────────────────────────────────────
 
 
 @dataclass
 class IdentityKey:
-    """Marker for Pydantic model fields that define the workflow's identity."""
+    """Marker for Pydantic model fields that define the task's identity."""
     pass
 
 
 @dataclass
-class WorkflowEntry:
-    """Unified descriptor for a registered workflow.
+class TaskEntry:
+    """Unified descriptor for a registered task.
 
     Attributes
     ----------
     name : str
         Unique identifier (e.g. ``"myapp.compute_features"``).
     fn : Callable
-        The workflow function.  Signature: ``fn(context) -> dict | None``.
+        The task function.  Signature: ``fn(context) -> dict | None``.
     display_name : str
         Human-readable name shown in UIs.
     queue : str
@@ -57,7 +57,7 @@ class WorkflowEntry:
         An inner ``Outputs`` class with a ``files`` dict mapping filenames
         to ``OutputFile`` descriptors.  Used for output validation.
     identity_keys : list[str] | None
-        List of keys in kwargs that define the workflow's identity for hashing.
+        List of keys in kwargs that define the task's identity for hashing.
         If None, all kwargs are used.
     """
 
@@ -72,8 +72,8 @@ class WorkflowEntry:
 
 # ── Registry storage ───────────────────────────────────────────────────────
 
-_entries_by_name: Dict[str, WorkflowEntry] = {}
-_entries_by_display_name: Dict[str, WorkflowEntry] = {}
+_entries_by_name: Dict[str, TaskEntry] = {}
+_entries_by_display_name: Dict[str, TaskEntry] = {}
 
 
 # ── Exceptions ─────────────────────────────────────────────────────────────
@@ -84,25 +84,25 @@ class RegistryError(Exception):
 
 
 class AlreadyRegisteredException(RegistryError):
-    """A workflow has already been registered with this name."""
+    """A task has already been registered with this name."""
 
     def __init__(self, name: str):
         self.name = name
-        super().__init__(f"Workflow '{name}' is already registered.")
+        super().__init__(f"Task '{name}' is already registered.")
 
 
 class NotRegisteredException(RegistryError):
-    """No workflow is registered with this name."""
+    """No task is registered with this name."""
 
     def __init__(self, name: str):
         self.name = name
-        super().__init__(f"No workflow registered with name '{name}'.")
+        super().__init__(f"No task registered with name '{name}'.")
 
 
 # ── Function-based registration ───────────────────────────────────────────
 
 
-def register_workflow(
+def register_task(
     name: str,
     *,
     display_name: str = "",
@@ -110,16 +110,16 @@ def register_workflow(
     parameters: Optional[Type[pydantic.BaseModel]] = None,
     outputs: Optional[Type] = None,
 ) -> Callable:
-    """Decorator that registers a function as a workflow.
+    """Decorator that registers a function as a task.
 
-    Workflows are pure computational units with no knowledge of DAG
+    Tasks are pure computational units with no knowledge of DAG
     topology.  Use :class:`~muflow.pipeline.Pipeline` to compose
-    workflows into multi-step DAGs.
+    tasks into multi-step DAGs.
 
     Parameters
     ----------
     name : str
-        Unique workflow identifier (e.g., "myapp.analyse").
+        Unique task identifier (e.g., "myapp.analyse").
     display_name : str, optional
         Human-readable name for UIs.
     queue : str, optional
@@ -133,13 +133,13 @@ def register_workflow(
     -------
     >>> from typing import Annotated
     >>> import pydantic
-    >>> from muflow import register_workflow, IdentityKey
+    >>> from muflow import register_task, IdentityKey
     >>>
     >>> class MyParams(pydantic.BaseModel):
     ...     id: Annotated[str, IdentityKey()]
     ...     other: str
     >>>
-    >>> @register_workflow("myapp.greet", parameters=MyParams)
+    >>> @register_task("myapp.greet", parameters=MyParams)
     ... def greet(context):
     ...     pass
     """
@@ -157,7 +157,7 @@ def register_workflow(
             if not final_identity_keys:
                 final_identity_keys = None
 
-        entry = WorkflowEntry(
+        entry = TaskEntry(
             name=name,
             fn=fn,
             display_name=display_name,
@@ -175,8 +175,8 @@ def register_workflow(
 # ── Internal helpers ───────────────────────────────────────────────────────
 
 
-def _register_entry(entry: WorkflowEntry) -> None:
-    """Store a WorkflowEntry in the registry."""
+def _register_entry(entry: TaskEntry) -> None:
+    """Store a TaskEntry in the registry."""
     if entry.name in _entries_by_name:
         raise AlreadyRegisteredException(entry.name)
     _entries_by_name[entry.name] = entry
@@ -187,39 +187,39 @@ def _register_entry(entry: WorkflowEntry) -> None:
 # ── Lookup ─────────────────────────────────────────────────────────────────
 
 
-def get(name: str) -> Optional[WorkflowEntry]:
-    """Get a registered workflow by name."""
+def get(name: str) -> Optional[TaskEntry]:
+    """Get a registered task by name."""
     return _entries_by_name.get(name)
 
 
-def get_by_display_name(display_name: str) -> Optional[WorkflowEntry]:
-    """Get a registered workflow by display name."""
+def get_by_display_name(display_name: str) -> Optional[TaskEntry]:
+    """Get a registered task by display name."""
     return _entries_by_display_name.get(display_name)
 
 
-def get_all() -> Dict[str, WorkflowEntry]:
-    """Get all registered workflows."""
+def get_all() -> Dict[str, TaskEntry]:
+    """Get all registered tasks."""
     return dict(_entries_by_name)
 
 
 def get_names() -> list:
-    """Get list of all registered workflow names."""
+    """Get list of all registered task names."""
     return list(_entries_by_name.keys())
 
 
 def clear() -> None:
-    """Clear all registered workflows.  Primarily for testing."""
+    """Clear all registered tasks.  Primarily for testing."""
     _entries_by_name.clear()
     _entries_by_display_name.clear()
 
 
 def unregister(name: str) -> None:
-    """Unregister a workflow by name.
+    """Unregister a task by name.
 
     Raises
     ------
     NotRegisteredException
-        If no workflow with this name is registered.
+        If no task with this name is registered.
     """
     if name not in _entries_by_name:
         raise NotRegisteredException(name)

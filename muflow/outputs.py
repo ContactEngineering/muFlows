@@ -1,12 +1,12 @@
-"""Output schema infrastructure for workflow implementations.
+"""Output schema infrastructure for task implementations.
 
 This module provides the `OutputFile` descriptor and `get_outputs_schema()` function
-to declare and document workflow outputs a-priori. Workflows can use an inner `Outputs`
+to declare and document task outputs a-priori. Tasks can use an inner `Outputs`
 class to specify output files with their types and optional schemas.
 
 Example
 -------
->>> from muflow import OutputFile, register_workflow
+>>> from muflow import OutputFile, register_task
 >>> import pydantic
 >>>
 >>> class ResultSchema(pydantic.BaseModel):
@@ -22,8 +22,8 @@ Example
 ...         ),
 ...     }
 >>>
->>> @register_workflow(name="myapp.my_workflow", outputs=MyOutputs)
-... def my_workflow(context):
+>>> @register_task(name="myapp.my_task", outputs=MyOutputs)
+... def my_task(context):
 ...     pass
 """
 
@@ -35,7 +35,7 @@ import pydantic
 
 @dataclass
 class OutputFile:
-    """Descriptor for an output file produced by a workflow.
+    """Descriptor for an output file produced by a task.
 
     Attributes
     ----------
@@ -61,7 +61,7 @@ def get_outputs_schema(outputs_class) -> list:
     Parameters
     ----------
     outputs_class : class or None
-        The Outputs inner class from a WorkflowImplementation, or None.
+        The Outputs inner class from a TaskImplementation, or None.
 
     Returns
     -------

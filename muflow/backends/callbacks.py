@@ -1,7 +1,7 @@
 """Completion callback protocols and implementations.
 
-This module provides callback mechanisms for notifying when a workflow
-completes. Callbacks are triggered after workflow execution, regardless
+This module provides callback mechanisms for notifying when a task
+completes. Callbacks are triggered after task execution, regardless
 of success or failure.
 
 The callback pattern allows the orchestration layer (e.g., Django) to
@@ -22,12 +22,12 @@ _log = logging.getLogger(__name__)
 class CompletionCallback(Protocol):
     """Protocol for completion notifications.
 
-    Implementations receive notification when a workflow completes,
-    allowing them to update state, trigger downstream workflows, etc.
+    Implementations receive notification when a task completes,
+    allowing them to update state, trigger downstream tasks, etc.
     """
 
     def notify(self, analysis_id: int, result: ExecutionResult) -> None:
-        """Notify that a workflow completed.
+        """Notify that a task completed.
 
         Parameters
         ----------
@@ -43,9 +43,9 @@ class CeleryCompletionCallback:
     """Trigger a Celery task on completion.
 
     This is the primary callback mechanism for muFlow on Celery. When a
-    workflow completes, it sends a Celery task to a specified queue.
+    task completes, it sends a Celery task to a specified queue.
     The callback task typically has Django/database access to update
-    the WorkflowResult state.
+    the TaskResult state.
 
     Parameters
     ----------
@@ -63,7 +63,7 @@ class CeleryCompletionCallback:
     >>> app = Celery("myapp")
     >>> callback = CeleryCompletionCallback(
     ...     celery_app=app,
-    ...     task_name="topobank.analysis.tasks.on_workflow_complete",
+    ...     task_name="topobank.analysis.tasks.on_task_complete",
     ...     queue="callbacks",
     ... )
     >>>
@@ -72,7 +72,7 @@ class CeleryCompletionCallback:
     >>>
     >>> task = create_celery_task(
     ...     celery_app=app,
-    ...     workflow_registry={...},
+    ...     task_registry={...},
     ...     on_complete=callback.notify,
     ... )
     """
@@ -154,11 +154,11 @@ class LoggingCompletionCallback:
         """
         if result.success:
             self._log.info(
-                f"Workflow completed: analysis_id={analysis_id}, "
+                f"Task completed: analysis_id={analysis_id}, "
                 f"files_written={result.files_written}"
             )
         else:
             self._log.error(
-                f"Workflow failed: analysis_id={analysis_id}, "
+                f"Task failed: analysis_id={analysis_id}, "
                 f"error={result.error_message}"
             )

@@ -2,13 +2,13 @@
 
 *Pronounced "microflow" (μFlow).*
 
-Backend-agnostic workflow execution engine.
+Backend-agnostic task execution engine.
 
 ## Overview
 
-muFlow provides abstractions for defining and executing workflows that can run on multiple backends (Celery, AWS Lambda, AWS Step Functions) without modification.
+muFlow provides abstractions for defining and executing tasks that can run on multiple backends (Celery, AWS Lambda, AWS Step Functions) without modification.
 
-Workflows are registered as **pure computational units** via `@register_workflow`. DAG topology is declared separately in a **Pipeline** definition, keeping workflow logic decoupled from orchestration.
+Tasks are registered as **pure computational units** via `@register_task`. DAG topology is declared separately in a **Pipeline** definition, keeping task logic decoupled from orchestration.
 
 ## Installation
 
@@ -27,7 +27,7 @@ pip install muflow[dev]
 ```
 ┌─────────────────────────────────────────────────┐
 │                    User Code                    │
-│  @register_workflow()    Pipeline(steps={...})  │
+│  @register_task()    Pipeline(steps={...})  │
 └────────────────────────┬────────────────────────┘
                          │
                          ▼
@@ -39,7 +39,7 @@ pip install muflow[dev]
                          │
                          ▼
               ┌──────────────────────┐
-              │   WorkflowPlan (DAG) │
+              │   TaskPlan (DAG) │
               │   nodes, root_key    │
               └──────────┬───────────┘
                          │
@@ -53,29 +53,29 @@ pip install muflow[dev]
 
 ## Core Concepts
 
-### Registering Workflows
+### Registering Tasks
 
-Workflows are registered as plain functions:
+Tasks are registered as plain functions:
 
 ```python
-from muflow import register_workflow
+from muflow import register_task
 
-@register_workflow(name="ml.compute_features")
+@register_task(name="ml.compute_features")
 def compute_features(context):
     ds = context.kwargs["dataset_name"]
     # ... compute features ...
     context.save_json("features.json", {"dataset": ds, "features": [...]})
 ```
 
-### WorkflowContext
+### TaskContext
 
-The `WorkflowContext` wraps a `StorageBackend` and provides file I/O, dependency access, and progress reporting:
+The `TaskContext` wraps a `StorageBackend` and provides file I/O, dependency access, and progress reporting:
 
 ```python
 from muflow import create_local_context
 
 ctx = create_local_context(
-    path="/tmp/workflow-output",
+    path="/tmp/task-output",
     kwargs={"param1": "value1"},
 )
 
@@ -92,9 +92,9 @@ for key in ctx.dependency_keys():
     data = dep.read_json("features.json")
 ```
 
-### Pipelines (Recommended for Multi-Step Workflows)
+### Pipelines (Recommended for Multi-Step Tasks)
 
-The `Pipeline` abstraction lets you declare the full DAG in one place. Individual workflows remain pure — they have no knowledge of the DAG topology.
+The `Pipeline` abstraction lets you declare the full DAG in one place. Individual tasks remain pure — they have no knowledge of the DAG topology.
 
 ```python
 from muflow import Pipeline, Step, ForEach
@@ -104,17 +104,17 @@ ml_pipeline = Pipeline(
     display_name="ML Training Pipeline",
     steps={
         "features": ForEach(
-            workflow="ml.compute_features",
+            task="ml.compute_features",
             over=lambda subject_key, kwargs: [
                 {"dataset_name": ds} for ds in kwargs["datasets"]
             ],
         ),
         "train": Step(
-            workflow="ml.train_model",
+            task="ml.train_model",
             after=["features"],
         ),
         "loo_cv": ForEach(
-            workflow="ml.loo_cv",
+            task="ml.loo_cv",
             after=["features"],
             over=lambda subject_key, kwargs: [
                 {"leave_out_index": i, "datasets": kwargs["datasets"]}
@@ -122,7 +122,7 @@ ml_pipeline = Pipeline(
             ],
         ),
         "reports": ForEach(
-            workflow="ml.generate_report",
+            task="ml.generate_report",
             after=["train", "loo_cv"],
             over=lambda subject_key, kwargs: [
                 {"format": fmt} for fmt in ("pdf", "xlsx", "csv")
@@ -155,8 +155,8 @@ This produces the following DAG (for N=3 datasets, 11 nodes total):
 
 #### Step Types
 
-- **`Step(workflow, after)`** — a single job. Use `kwargs_map` to compute step-specific kwargs.
-- **`ForEach(workflow, over, after)`** — fan-out: `over(subject_key, kwargs)` returns a list of per-job kwargs dicts. One node is created per item.
+- **`Step(task, after)`** — a single job. Use `kwargs_map` to compute step-specific kwargs.
+- **`ForEach(task, over, after)`** — fan-out: `over(subject_key, kwargs)` returns a list of per-job kwargs dicts. One node is created per item.
 
 #### Dependency Access Keys
 
@@ -166,7 +166,7 @@ When a downstream step references an upstream `ForEach` step, the access keys us
 # upstream "features" has 3 jobs → access keys are "features:0", "features:1", "features:2"
 # upstream "train" has 1 job → access key is just "train"
 
-@register_workflow(name="ml.generate_report")
+@register_task(name="ml.generate_report")
 def generate_report(context):
     model = context.dependency("train").read_json("model.json")
     for key in context.dependency_keys():
@@ -174,12 +174,12 @@ def generate_report(context):
             cv = context.dependency(key).read_json("cv_result.json")
 ```
 
-### WorkflowPlan
+### TaskPlan
 
 A static DAG representing the complete execution plan. Plans are compiled from a Pipeline definition once upfront and can be serialized as JSON.
 
 ```python
-from muflow import WorkflowPlan
+from muflow import TaskPlan
 
 # Build from a pipeline
 plan = my_pipeline.build_plan("tag:1", {"param": "value"})
@@ -208,18 +208,18 @@ muFlow uses deterministic, content-addressed storage prefixes. Same inputs alway
 from muflow import compute_prefix
 
 prefix = compute_prefix(
-    {"workflow": "my.workflow", "subject": "data:123", "param": "value"},
+    {"task": "my.task", "subject": "data:123", "param": "value"},
 )
-# Returns: "muflow/my.workflow/a1b2c3d4..."
+# Returns: "muflow/my.task/a1b2c3d4..."
 ```
 
 ### Caching
 
-Both `Pipeline.build_plan()` and `WorkflowPlanner.build_plan()` accept an `is_cached` callback. Cached nodes are skipped during execution, and their dependents treat them as already completed:
+Both `Pipeline.build_plan()` and `TaskPlanner.build_plan()` accept an `is_cached` callback. Cached nodes are skipped during execution, and their dependents treat them as already completed:
 
 ```python
-def check_cache(workflow_name, subject_key, kwargs):
-    prefix = compute_prefix({"workflow": workflow_name, "subject": subject_key, **kwargs})
+def check_cache(task_name, subject_key, kwargs):
+    prefix = compute_prefix({"task": task_name, "subject": subject_key, **kwargs})
     return storage.exists(f"{prefix}/manifest.json")
 
 plan = ml_pipeline.build_plan(
@@ -237,13 +237,13 @@ Use `IdentityKey` annotations to control which parameters affect caching. Only i
 ```python
 from typing import Annotated
 import pydantic
-from muflow import IdentityKey, register_workflow
+from muflow import IdentityKey, register_task
 
 class TrainParams(pydantic.BaseModel):
     dataset_id: Annotated[int, IdentityKey()]  # affects hash
     display_name: str                           # does not affect hash
 
-@register_workflow(name="ml.train", parameters=TrainParams)
+@register_task(name="ml.train", parameters=TrainParams)
 def train(context):
     # context.kwargs is a validated TrainParams instance
     print(context.kwargs.dataset_id)

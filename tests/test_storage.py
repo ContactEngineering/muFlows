@@ -235,21 +235,21 @@ class TestLocalStorageBackend:
     # ── hash_dict constructor ───────────────────────────────────────────
 
     def test_hash_dict_creates_subdirectory(self, tmp_path):
-        hash_dict = {"workflow": "test.wf", "subject": 1}
+        hash_dict = {"task": "test.wf", "subject": 1}
         backend = LocalStorageBackend(tmp_path, hash_dict=hash_dict)
         assert "test.wf" in backend.storage_prefix
         assert str(tmp_path) in backend.storage_prefix
 
     def test_hash_dict_deterministic(self, tmp_path):
-        d = {"workflow": "test.wf", "x": 42}
+        d = {"task": "test.wf", "x": 42}
         b1 = LocalStorageBackend(tmp_path / "a", hash_dict=d)
         b2 = LocalStorageBackend(tmp_path / "b", hash_dict=d)
         # Same hash dict → same final path component
         assert b1.storage_prefix.split("/")[-1] == b2.storage_prefix.split("/")[-1]
 
     def test_hash_dict_different_for_different_input(self, tmp_path):
-        b1 = LocalStorageBackend(tmp_path / "a", hash_dict={"workflow": "w", "x": 1})
-        b2 = LocalStorageBackend(tmp_path / "b", hash_dict={"workflow": "w", "x": 2})
+        b1 = LocalStorageBackend(tmp_path / "a", hash_dict={"task": "w", "x": 1})
+        b2 = LocalStorageBackend(tmp_path / "b", hash_dict={"task": "w", "x": 2})
         assert b1.storage_prefix != b2.storage_prefix
 
 
@@ -258,27 +258,27 @@ class TestLocalStorageBackend:
 
 class TestComputePrefix:
     def test_deterministic(self):
-        d = {"workflow": "my.wf", "subject": 123, "param": "a"}
+        d = {"task": "my.wf", "subject": 123, "param": "a"}
         assert compute_prefix(d) == compute_prefix(d)
 
     def test_different_inputs_different_prefix(self):
-        p1 = compute_prefix({"workflow": "my.wf", "x": 1})
-        p2 = compute_prefix({"workflow": "my.wf", "x": 2})
+        p1 = compute_prefix({"task": "my.wf", "x": 1})
+        p2 = compute_prefix({"task": "my.wf", "x": 2})
         assert p1 != p2
 
-    def test_includes_workflow_label(self):
-        p = compute_prefix({"workflow": "topobank_statistics.acf", "id": 1})
+    def test_includes_task_label(self):
+        p = compute_prefix({"task": "topobank_statistics.acf", "id": 1})
         assert "topobank_statistics.acf" in p
 
     def test_key_order_independent(self):
-        p1 = compute_prefix({"b": 2, "a": 1, "workflow": "w"})
-        p2 = compute_prefix({"a": 1, "workflow": "w", "b": 2})
+        p1 = compute_prefix({"b": 2, "a": 1, "task": "w"})
+        p2 = compute_prefix({"a": 1, "task": "w", "b": 2})
         assert p1 == p2
 
     def test_custom_base_prefix(self):
-        p = compute_prefix({"workflow": "w"}, base_prefix="data-lake")
+        p = compute_prefix({"task": "w"}, base_prefix="data-lake")
         assert p.startswith("data-lake/")
 
-    def test_unknown_workflow_label(self):
+    def test_unknown_task_label(self):
         p = compute_prefix({"x": 1})
         assert "unknown" in p

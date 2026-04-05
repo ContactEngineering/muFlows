@@ -2,40 +2,40 @@
 
 import pytest
 
-from muflow.plan import WorkflowNode, WorkflowPlan
+from muflow.plan import TaskNode, TaskPlan
 from muflow.registry import clear
 
 
 @pytest.fixture(autouse=False)
 def clean_registry():
-    """Reset workflow registry between tests."""
+    """Reset task registry between tests."""
     clear()
     yield
     clear()
 
 
-def simple_plan() -> WorkflowPlan:
+def simple_plan() -> TaskPlan:
     """Single-node plan: A."""
-    node = WorkflowNode(
+    node = TaskNode(
         key="muflow/test.simple/aaa",
         function="test.simple",
         subject_key="sub:1",
         kwargs={},
         storage_prefix="muflow/test.simple/aaa",
     )
-    return WorkflowPlan(nodes={node.key: node}, root_key=node.key)
+    return TaskPlan(nodes={node.key: node}, root_key=node.key)
 
 
-def linear_plan() -> WorkflowPlan:
+def linear_plan() -> TaskPlan:
     """Two-node linear plan: dep → root."""
-    dep = WorkflowNode(
+    dep = TaskNode(
         key="muflow/test.dep/bbb",
         function="test.dep",
         subject_key="sub:1",
         kwargs={},
         storage_prefix="muflow/test.dep/bbb",
     )
-    root = WorkflowNode(
+    root = TaskNode(
         key="muflow/test.root/ccc",
         function="test.root",
         subject_key="sub:1",
@@ -43,16 +43,16 @@ def linear_plan() -> WorkflowPlan:
         storage_prefix="muflow/test.root/ccc",
         depends_on=["muflow/test.dep/bbb"],
     )
-    return WorkflowPlan(
+    return TaskPlan(
         nodes={dep.key: dep, root.key: root},
         root_key=root.key,
     )
 
 
-def fan_in_plan() -> WorkflowPlan:
+def fan_in_plan() -> TaskPlan:
     """Three leaf nodes feeding one root: leaf0, leaf1, leaf2 → root."""
     leaves = [
-        WorkflowNode(
+        TaskNode(
             key=f"muflow/test.leaf/l{i}",
             function="test.leaf",
             subject_key=f"sub:{i}",
@@ -61,7 +61,7 @@ def fan_in_plan() -> WorkflowPlan:
         )
         for i in range(3)
     ]
-    root = WorkflowNode(
+    root = TaskNode(
         key="muflow/test.root/rrr",
         function="test.root",
         subject_key="sub:all",
@@ -71,19 +71,19 @@ def fan_in_plan() -> WorkflowPlan:
     )
     nodes = {node.key: node for node in leaves}
     nodes[root.key] = root
-    return WorkflowPlan(nodes=nodes, root_key=root.key)
+    return TaskPlan(nodes=nodes, root_key=root.key)
 
 
-def diamond_plan() -> WorkflowPlan:
+def diamond_plan() -> TaskPlan:
     """Diamond DAG: A → B, C → D (4 nodes, 3 levels)."""
-    a = WorkflowNode(
+    a = TaskNode(
         key="muflow/test.a/aaa",
         function="test.a",
         subject_key="sub:1",
         kwargs={},
         storage_prefix="muflow/test.a/aaa",
     )
-    b = WorkflowNode(
+    b = TaskNode(
         key="muflow/test.b/bbb",
         function="test.b",
         subject_key="sub:1",
@@ -91,7 +91,7 @@ def diamond_plan() -> WorkflowPlan:
         storage_prefix="muflow/test.b/bbb",
         depends_on=["muflow/test.a/aaa"],
     )
-    c = WorkflowNode(
+    c = TaskNode(
         key="muflow/test.c/ccc",
         function="test.c",
         subject_key="sub:1",
@@ -99,7 +99,7 @@ def diamond_plan() -> WorkflowPlan:
         storage_prefix="muflow/test.c/ccc",
         depends_on=["muflow/test.a/aaa"],
     )
-    d = WorkflowNode(
+    d = TaskNode(
         key="muflow/test.d/ddd",
         function="test.d",
         subject_key="sub:1",
@@ -108,12 +108,12 @@ def diamond_plan() -> WorkflowPlan:
         depends_on=["muflow/test.b/bbb", "muflow/test.c/ccc"],
     )
     nodes = {n.key: n for n in [a, b, c, d]}
-    return WorkflowPlan(nodes=nodes, root_key=d.key)
+    return TaskPlan(nodes=nodes, root_key=d.key)
 
 
-def all_cached_plan() -> WorkflowPlan:
+def all_cached_plan() -> TaskPlan:
     """Single cached node."""
-    node = WorkflowNode(
+    node = TaskNode(
         key="muflow/test.simple/aaa",
         function="test.simple",
         subject_key="sub:1",
@@ -121,12 +121,12 @@ def all_cached_plan() -> WorkflowPlan:
         storage_prefix="muflow/test.simple/aaa",
         cached=True,
     )
-    return WorkflowPlan(nodes={node.key: node}, root_key=node.key)
+    return TaskPlan(nodes={node.key: node}, root_key=node.key)
 
 
-def partial_cache_plan() -> WorkflowPlan:
+def partial_cache_plan() -> TaskPlan:
     """Cached dep → non-cached root."""
-    dep = WorkflowNode(
+    dep = TaskNode(
         key="d",
         function="test.dep",
         subject_key="s",
@@ -134,7 +134,7 @@ def partial_cache_plan() -> WorkflowPlan:
         storage_prefix="d",
         cached=True,
     )
-    root = WorkflowNode(
+    root = TaskNode(
         key="r",
         function="test.root",
         subject_key="s",
@@ -142,4 +142,4 @@ def partial_cache_plan() -> WorkflowPlan:
         storage_prefix="r",
         depends_on=["d"],
     )
-    return WorkflowPlan(nodes={"d": dep, "r": root}, root_key="r")
+    return TaskPlan(nodes={"d": dep, "r": root}, root_key="r")

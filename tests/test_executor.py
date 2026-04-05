@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pydantic
 
-from muflow import WorkflowEntry, create_local_context
-from muflow.executor import ExecutionPayload, ExecutionResult, execute_workflow
+from muflow import TaskEntry, create_local_context
+from muflow.executor import ExecutionPayload, ExecutionResult, execute_task
 
 
-def mock_workflow_fn(ctx):
+def mock_task_fn(ctx):
     user_id = ctx.kwargs.user_id if ctx.kwargs else 0
     ctx.save_json("result.json", {"status": "ok", "user_id": user_id})
 
@@ -19,20 +19,20 @@ class MockParams(pydantic.BaseModel):
     user_id: int = 0
 
 
-def failing_workflow_fn(ctx):
+def failing_task_fn(ctx):
     raise ValueError("Intentional failure for testing")
 
 
 # Simple registry for tests
 TEST_REGISTRY = {
-    "test.mock_workflow": WorkflowEntry(
-        name="test.mock_workflow",
-        fn=mock_workflow_fn,
+    "test.mock_task": TaskEntry(
+        name="test.mock_task",
+        fn=mock_task_fn,
         parameters=MockParams,
     ),
-    "test.failing_workflow": WorkflowEntry(
-        name="test.failing_workflow",
-        fn=failing_workflow_fn,
+    "test.failing_task": TaskEntry(
+        name="test.failing_task",
+        fn=failing_task_fn,
     ),
 }
 
@@ -48,11 +48,11 @@ class TestExecutionPayload:
     def test_creation(self):
         """Should create payload with required fields."""
         payload = ExecutionPayload(
-            workflow_name="test.workflow",
+            task_name="test.task",
             kwargs={"param": "value"},
             storage_prefix="results/test",
         )
-        assert payload.workflow_name == "test.workflow"
+        assert payload.task_name == "test.task"
         assert payload.kwargs == {"param": "value"}
         assert payload.storage_prefix == "results/test"
         assert payload.dependency_prefixes == {}
@@ -60,14 +60,14 @@ class TestExecutionPayload:
     def test_to_dict(self):
         """Should serialize to dictionary."""
         payload = ExecutionPayload(
-            workflow_name="test.workflow",
+            task_name="test.task",
             kwargs={"param": "value"},
             storage_prefix="results/test",
             dependency_prefixes={"dep1": "results/dep1"},
         )
         d = payload.to_dict()
 
-        assert d["workflow_name"] == "test.workflow"
+        assert d["task_name"] == "test.task"
         assert d["kwargs"] == {"param": "value"}
         assert d["storage_prefix"] == "results/test"
         assert d["dependency_prefixes"] == {"dep1": "results/dep1"}
@@ -75,14 +75,14 @@ class TestExecutionPayload:
     def test_from_dict(self):
         """Should deserialize from dictionary."""
         d = {
-            "workflow_name": "test.workflow",
+            "task_name": "test.task",
             "kwargs": {"param": "value"},
             "storage_prefix": "results/test",
             "dependency_prefixes": {"dep1": "results/dep1"},
         }
         payload = ExecutionPayload.from_dict(d)
 
-        assert payload.workflow_name == "test.workflow"
+        assert payload.task_name == "test.task"
         assert payload.kwargs == {"param": "value"}
         assert payload.storage_prefix == "results/test"
         assert payload.dependency_prefixes == {"dep1": "results/dep1"}
@@ -90,14 +90,14 @@ class TestExecutionPayload:
     def test_roundtrip(self):
         """Should survive serialization roundtrip."""
         original = ExecutionPayload(
-            workflow_name="test.workflow",
+            task_name="test.task",
             kwargs={"param": "value"},
             storage_prefix="results/test",
             dependency_prefixes={"dep1": "results/dep1"},
         )
         restored = ExecutionPayload.from_dict(original.to_dict())
 
-        assert restored.workflow_name == original.workflow_name
+        assert restored.task_name == original.task_name
         assert restored.kwargs == original.kwargs
         assert restored.storage_prefix == original.storage_prefix
         assert restored.dependency_prefixes == original.dependency_prefixes
@@ -155,21 +155,21 @@ class TestExecutionResult:
         assert result.error_traceback == "Traceback"
 
 
-class TestExecuteWorkflow:
-    """Tests for execute_workflow function."""
+class TestExecuteTask:
+    """Tests for execute_task function."""
 
     def test_successful_execution(self):
-        """Should execute workflow and return success."""
+        """Should execute task and return success."""
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = ExecutionPayload(
-                workflow_name="test.mock_workflow",
+                task_name="test.mock_task",
                 kwargs={"user_id": 42},
                 storage_prefix=tmpdir,
             )
 
             ctx = create_local_context(path=tmpdir, kwargs=payload.kwargs)
 
-            result = execute_workflow(payload, ctx, get_test_implementation)
+            result = execute_task(payload, ctx, get_test_implementation)
 
             assert result.success is True
             assert result.error_message is None
@@ -184,13 +184,13 @@ class TestExecuteWorkflow:
         """Should write manifest.json after execution."""
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = ExecutionPayload(
-                workflow_name="test.mock_workflow",
+                task_name="test.mock_task",
                 kwargs={"user_id": 1},
                 storage_prefix=tmpdir,
             )
             ctx = create_local_context(path=tmpdir, kwargs=payload.kwargs)
 
-            execute_workflow(payload, ctx, get_test_implementation)
+            execute_task(payload, ctx, get_test_implementation)
 
             manifest_path = Path(tmpdir) / "manifest.json"
             assert manifest_path.exists()
@@ -201,14 +201,14 @@ class TestExecuteWorkflow:
         """Should catch exceptions and return failure result."""
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = ExecutionPayload(
-                workflow_name="test.failing_workflow",
+                task_name="test.failing_task",
                 kwargs={},
                 storage_prefix=tmpdir,
             )
 
             ctx = create_local_context(path=tmpdir, kwargs={})
 
-            result = execute_workflow(payload, ctx, get_test_implementation)
+            result = execute_task(payload, ctx, get_test_implementation)
 
             assert result.success is False
             assert "Intentional failure" in result.error_message
@@ -219,56 +219,56 @@ class TestExecuteWorkflow:
         """Should write manifest.json even on failure."""
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = ExecutionPayload(
-                workflow_name="test.failing_workflow",
+                task_name="test.failing_task",
                 kwargs={},
                 storage_prefix=tmpdir,
             )
             ctx = create_local_context(path=tmpdir, kwargs={})
 
-            execute_workflow(payload, ctx, get_test_implementation)
+            execute_task(payload, ctx, get_test_implementation)
 
             manifest_path = Path(tmpdir) / "manifest.json"
             assert manifest_path.exists()
 
-    def test_unknown_workflow(self):
-        """Should return failure for unknown workflow."""
+    def test_unknown_task(self):
+        """Should return failure for unknown task."""
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = ExecutionPayload(
-                workflow_name="nonexistent.workflow",
+                task_name="nonexistent.task",
                 kwargs={},
                 storage_prefix=tmpdir,
             )
 
             ctx = create_local_context(path=tmpdir, kwargs={})
 
-            result = execute_workflow(payload, ctx, get_test_implementation)
+            result = execute_task(payload, ctx, get_test_implementation)
 
             assert result.success is False
-            assert "nonexistent.workflow" in result.error_message
+            assert "nonexistent.task" in result.error_message
 
     def test_protected_file_write_fails(self):
-        """Workflow that writes to a protected file should fail."""
+        """Task that writes to a protected file should fail."""
 
-        def bad_workflow_fn(ctx):
+        def bad_task_fn(ctx):
             ctx.save_json("context.json", {})
 
         registry = {
-            "test.bad_workflow": WorkflowEntry(
-                name="test.bad_workflow",
-                fn=bad_workflow_fn,
+            "test.bad_task": TaskEntry(
+                name="test.bad_task",
+                fn=bad_task_fn,
             )
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = ExecutionPayload(
-                workflow_name="test.bad_workflow",
+                task_name="test.bad_task",
                 kwargs={},
                 storage_prefix=tmpdir,
             )
 
             ctx = create_local_context(path=tmpdir, kwargs={})
 
-            result = execute_workflow(payload, ctx, lambda name: registry[name])
+            result = execute_task(payload, ctx, lambda name: registry[name])
 
             assert result.success is False
             assert "protected" in result.error_message
@@ -277,14 +277,14 @@ class TestExecuteWorkflow:
         """Should write context.json before execution."""
         with tempfile.TemporaryDirectory() as tmpdir:
             payload = ExecutionPayload(
-                workflow_name="test.mock_workflow",
+                task_name="test.mock_task",
                 kwargs={"user_id": 1},
                 storage_prefix=tmpdir,
                 context_data={"foo": "bar"}
             )
             ctx = create_local_context(path=tmpdir, kwargs=payload.kwargs)
 
-            execute_workflow(payload, ctx, get_test_implementation)
+            execute_task(payload, ctx, get_test_implementation)
 
             context_path = Path(tmpdir) / "context.json"
             assert context_path.exists()

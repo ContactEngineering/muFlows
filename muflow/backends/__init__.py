@@ -1,6 +1,6 @@
 """Execution backends for muflow.
 
-Backends receive an entire WorkflowPlan and orchestrate execution using
+Backends receive an entire TaskPlan and orchestrate execution using
 their native primitives:
 
 - LocalBackend: Serial execution in-process (for testing/CLI)

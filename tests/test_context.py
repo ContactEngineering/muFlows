@@ -1,4 +1,4 @@
-"""Tests for WorkflowContext."""
+"""Tests for TaskContext."""
 
 import tempfile
 from pathlib import Path
@@ -7,11 +7,11 @@ import numpy as np
 import pytest
 import xarray as xr
 
-from muflow import WorkflowContext, create_local_context
+from muflow import TaskContext, create_local_context
 
 
-class TestWorkflowContext:
-    """Tests for WorkflowContext."""
+class TestTaskContext:
+    """Tests for TaskContext."""
 
     def test_storage_prefix(self):
         """storage_prefix should return the path."""

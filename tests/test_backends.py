@@ -5,14 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from muflow import WorkflowNode, WorkflowPlan, register_workflow, registry
+from muflow import TaskNode, TaskPlan, register_task, registry
 from muflow.backends import LocalBackend
 
 
-# Test workflows
-@register_workflow(name="test.leaf_workflow")
-def leaf_workflow(context):
-    """Simple leaf workflow that writes a result."""
+# Test tasks
+@register_task(name="test.leaf_task")
+def leaf_task(context):
+    """Simple leaf task that writes a result."""
     params = context.kwargs
     context.save_json("result.json", {
         "id": params.get("id", "unknown"),
@@ -20,9 +20,9 @@ def leaf_workflow(context):
     })
 
 
-@register_workflow(name="test.dependent_workflow")
-def dependent_workflow(context):
-    """Workflow that reads from dependencies."""
+@register_task(name="test.dependent_task")
+def dependent_task(context):
+    """Task that reads from dependencies."""
     # Read from dependencies
     dep_results = []
     for i in range(3):
@@ -38,9 +38,9 @@ def dependent_workflow(context):
     })
 
 
-@register_workflow(name="test.failing_workflow")
-def failing_workflow(context):
-    """Workflow that always fails."""
+@register_task(name="test.failing_task")
+def failing_task(context):
+    """Task that always fails."""
     raise ValueError("Intentional failure for testing")
 
 
@@ -51,15 +51,15 @@ class TestLocalBackend:
         """Should execute a plan with a single node."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Build a simple plan with one node
-            node = WorkflowNode(
+            node = TaskNode(
                 key="node1",
-                function="test.leaf_workflow",
+                function="test.leaf_task",
                 subject_key="test:1",
                 kwargs={"id": "node1"},
                 storage_prefix=f"{tmpdir}/node1",
                 depends_on=[],
             )
-            plan = WorkflowPlan(nodes={"node1": node}, root_key="node1")
+            plan = TaskPlan(nodes={"node1": node}, root_key="node1")
 
             # Execute
             backend = LocalBackend(tmpdir, registry.get)
@@ -78,9 +78,9 @@ class TestLocalBackend:
 
             # Leaf nodes
             for i in range(3):
-                node = WorkflowNode(
+                node = TaskNode(
                     key=f"leaf_{i}",
-                    function="test.leaf_workflow",
+                    function="test.leaf_task",
                     subject_key=f"test:{i}",
                     kwargs={"id": f"leaf_{i}"},
                     storage_prefix=f"{tmpdir}/leaf_{i}",
@@ -89,9 +89,9 @@ class TestLocalBackend:
                 nodes[node.key] = node
 
             # Dependent node
-            root = WorkflowNode(
+            root = TaskNode(
                 key="root",
-                function="test.dependent_workflow",
+                function="test.dependent_task",
                 subject_key="test:root",
                 kwargs={},
                 storage_prefix=f"{tmpdir}/root",
@@ -99,7 +99,7 @@ class TestLocalBackend:
             )
             nodes["root"] = root
 
-            plan = WorkflowPlan(nodes=nodes, root_key="root")
+            plan = TaskPlan(nodes=nodes, root_key="root")
 
             # Execute
             backend = LocalBackend(tmpdir, registry.get)
@@ -132,33 +132,33 @@ class TestLocalBackend:
             )
 
             # Build plan with one cached node
-            cached_node = WorkflowNode(
+            cached_node = TaskNode(
                 key="cached",
-                function="test.leaf_workflow",
+                function="test.leaf_task",
                 subject_key="test:cached",
                 kwargs={"id": "cached"},
                 storage_prefix=str(cached_dir),
                 depends_on=[],
                 cached=True,  # Mark as cached
             )
-            new_node = WorkflowNode(
+            new_node = TaskNode(
                 key="new",
-                function="test.leaf_workflow",
+                function="test.leaf_task",
                 subject_key="test:new",
                 kwargs={"id": "new"},
                 storage_prefix=f"{tmpdir}/new",
                 depends_on=[],
             )
-            root = WorkflowNode(
+            root = TaskNode(
                 key="root",
-                function="test.dependent_workflow",
+                function="test.dependent_task",
                 subject_key="test:root",
                 kwargs={},
                 storage_prefix=f"{tmpdir}/root",
                 depends_on=["cached", "new"],
             )
 
-            plan = WorkflowPlan(
+            plan = TaskPlan(
                 nodes={"cached": cached_node, "new": new_node, "root": root},
                 root_key="root",
             )
@@ -183,15 +183,15 @@ class TestLocalBackend:
         """Should handle node failure and call failure callback."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Build plan with a failing node
-            node = WorkflowNode(
+            node = TaskNode(
                 key="failing",
-                function="test.failing_workflow",
+                function="test.failing_task",
                 subject_key="test:1",
                 kwargs={},
                 storage_prefix=f"{tmpdir}/failing",
                 depends_on=[],
             )
-            plan = WorkflowPlan(nodes={"failing": node}, root_key="failing")
+            plan = TaskPlan(nodes={"failing": node}, root_key="failing")
 
             # Execute
             backend = LocalBackend(tmpdir, registry.get)
@@ -214,23 +214,23 @@ class TestLocalBackend:
         """Should stop execution when a node fails."""
         with tempfile.TemporaryDirectory() as tmpdir:
             # Build plan: failing_node -> dependent_node
-            failing = WorkflowNode(
+            failing = TaskNode(
                 key="failing",
-                function="test.failing_workflow",
+                function="test.failing_task",
                 subject_key="test:1",
                 kwargs={},
                 storage_prefix=f"{tmpdir}/failing",
                 depends_on=[],
             )
-            dependent = WorkflowNode(
+            dependent = TaskNode(
                 key="dependent",
-                function="test.leaf_workflow",
+                function="test.leaf_task",
                 subject_key="test:2",
                 kwargs={"id": "dependent"},
                 storage_prefix=f"{tmpdir}/dependent",
                 depends_on=["failing"],
             )
-            plan = WorkflowPlan(
+            plan = TaskPlan(
                 nodes={"failing": failing, "dependent": dependent},
                 root_key="dependent",
             )
@@ -273,28 +273,28 @@ class TestExecutionLevels:
             D
         """
         with tempfile.TemporaryDirectory() as tmpdir:
-            a = WorkflowNode(
-                key="A", function="test.leaf_workflow",
+            a = TaskNode(
+                key="A", function="test.leaf_task",
                 subject_key="test:A", kwargs={"id": "A"},
                 storage_prefix=f"{tmpdir}/A", depends_on=[],
             )
-            b = WorkflowNode(
-                key="B", function="test.leaf_workflow",
+            b = TaskNode(
+                key="B", function="test.leaf_task",
                 subject_key="test:B", kwargs={"id": "B"},
                 storage_prefix=f"{tmpdir}/B", depends_on=["A"],
             )
-            c = WorkflowNode(
-                key="C", function="test.leaf_workflow",
+            c = TaskNode(
+                key="C", function="test.leaf_task",
                 subject_key="test:C", kwargs={"id": "C"},
                 storage_prefix=f"{tmpdir}/C", depends_on=["A"],
             )
-            d = WorkflowNode(
-                key="D", function="test.dependent_workflow",
+            d = TaskNode(
+                key="D", function="test.dependent_task",
                 subject_key="test:D", kwargs={},
                 storage_prefix=f"{tmpdir}/D", depends_on=["B", "C"],
             )
 
-            plan = WorkflowPlan(
+            plan = TaskPlan(
                 nodes={"A": a, "B": b, "C": c, "D": d},
                 root_key="D",
             )

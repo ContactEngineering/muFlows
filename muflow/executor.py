@@ -1,15 +1,15 @@
-"""Pure workflow execution.
+"""Pure task execution.
 
 This module provides the core execution function that is completely
 database-agnostic. The same function can be called from:
-- Celery tasks (with WorkflowContext + S3StorageBackend)
-- AWS Lambda handlers (with WorkflowContext + S3StorageBackend)
-- AWS Batch jobs (with WorkflowContext + S3StorageBackend)
+- Celery tasks (with TaskContext + S3StorageBackend)
+- AWS Lambda handlers (with TaskContext + S3StorageBackend)
+- AWS Batch jobs (with TaskContext + S3StorageBackend)
 - Local testing (with create_local_context)
 
 The execution layer has no knowledge of Django, database models, or
 TopoBank-specific concepts like "subjects". All domain-specific logic
-is handled by the calling layer before invoking execute_workflow().
+is handled by the calling layer before invoking execute_task().
 """
 
 from __future__ import annotations
@@ -19,21 +19,21 @@ from typing import Callable, Optional
 
 import pydantic
 
-from muflow.context import WorkflowContext
+from muflow.context import TaskContext
 
 
 class ExecutionPayload(pydantic.BaseModel):
-    """Serializable input for workflow execution.
+    """Serializable input for task execution.
 
-    Contains all information needed to execute a workflow without
+    Contains all information needed to execute a task without
     any database access, plus optional routing information.
 
     Attributes
     ----------
-    workflow_name : str
-        Name of the workflow implementation to run.
+    task_name : str
+        Name of the task implementation to run.
     kwargs : dict
-        Parameters to pass to the workflow.
+        Parameters to pass to the task.
     storage_prefix : str
         S3 key prefix or local path for output files.
     context_data : dict
@@ -47,7 +47,7 @@ class ExecutionPayload(pydantic.BaseModel):
 
     model_config = pydantic.ConfigDict(extra="forbid")
 
-    workflow_name: str
+    task_name: str
     kwargs: dict
     storage_prefix: str
     context_data: dict = {}
@@ -65,7 +65,7 @@ class ExecutionPayload(pydantic.BaseModel):
 
 
 class ExecutionResult(pydantic.BaseModel):
-    """Serializable output from workflow execution.
+    """Serializable output from task execution.
 
     Attributes
     ----------
@@ -96,15 +96,15 @@ class ExecutionResult(pydantic.BaseModel):
         return cls.model_validate(data)
 
 
-def execute_workflow(
+def execute_task(
     payload: ExecutionPayload,
-    context: WorkflowContext,
+    context: TaskContext,
     get_entry: Callable,
 ) -> ExecutionResult:
-    """Execute a workflow.  Pure function with no database access.
+    """Execute a task.  Pure function with no database access.
 
     This is the core execution function used by all backends.  It:
-    1. Looks up the ``WorkflowEntry`` by name
+    1. Looks up the ``TaskEntry`` by name
     2. Writes ``context.json`` to storage (from payload.context_data)
     3. Validates kwargs against the entry's ``parameters`` model (if any)
        and stores the result on ``context._parameters``
@@ -115,11 +115,11 @@ def execute_workflow(
     Parameters
     ----------
     payload : ExecutionPayload
-        Workflow name, kwargs, and storage configuration.
-    context : WorkflowContext
+        Task name, kwargs, and storage configuration.
+    context : TaskContext
         Execution context wrapping a storage backend.
-    get_entry : Callable[[str], WorkflowEntry]
-        Function that returns a ``WorkflowEntry`` for a workflow name.
+    get_entry : Callable[[str], TaskEntry]
+        Function that returns a ``TaskEntry`` for a task name.
         Typically ``lambda name: registry.get_all()[name]``.
 
     Returns
@@ -127,7 +127,7 @@ def execute_workflow(
     ExecutionResult
         Success status, any error information, and list of files written.
     """
-    from muflow.registry import WorkflowEntry
+    from muflow.registry import TaskEntry
 
     try:
         # Write context.json (protected, so use internal storage method if possible)
@@ -137,11 +137,11 @@ def execute_workflow(
             "context.json", payload.context_data, allow_protected=True
         )
 
-        # Look up the workflow entry
-        entry = get_entry(payload.workflow_name)
+        # Look up the task entry
+        entry = get_entry(payload.task_name)
 
-        if not isinstance(entry, WorkflowEntry):
-            raise TypeError(f"Registry returned non-WorkflowEntry: {type(entry)}")
+        if not isinstance(entry, TaskEntry):
+            raise TypeError(f"Registry returned non-TaskEntry: {type(entry)}")
 
         # Validate parameters and attach to context
         if entry.parameters is not None:
@@ -149,7 +149,7 @@ def execute_workflow(
         else:
             context._kwargs = payload.kwargs
 
-        # Execute the workflow
+        # Execute the task
         entry.fn(context)
 
         return ExecutionResult(

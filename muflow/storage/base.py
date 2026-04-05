@@ -4,12 +4,12 @@ A StorageBackend handles raw file I/O with built-in safety features:
 - Path traversal protection (rejects ``..`` and absolute paths)
 - Write-once semantics (no overwrites)
 - Protected files (``context.json`` and ``manifest.json`` cannot be written
-  by workflows)
+  by tasks)
 - Manifest generation (list of all files written during a session)
 
 Implementations include ``LocalStorageBackend`` (filesystem) and
 ``S3StorageBackend`` (AWS S3).  Domain-specific contexts (e.g.
-``TopographyContext`` in sds-workflows) wrap a storage backend and add
+``TopographyContext`` in sds-tasks) wrap a storage backend and add
 subject-loading behaviour.
 """
 
@@ -82,7 +82,7 @@ def validate_writable(
     """
     if not allow_protected and filename in PROTECTED_FILES:
         raise PermissionError(
-            f"'{filename}' is a protected file and cannot be written by " f"workflows."
+            f"'{filename}' is a protected file and cannot be written by " f"tasks."
         )
     if filename in written_files:
         raise FileExistsError(
@@ -100,7 +100,7 @@ def compute_prefix(
     """Compute a content-addressed storage prefix from a dictionary.
 
     The dictionary is serialised as sorted JSON and hashed with SHA-256.
-    The ``workflow`` key (if present) is used as a human-readable path
+    The ``task`` key (if present) is used as a human-readable path
     component.
 
     Parameters
@@ -111,24 +111,24 @@ def compute_prefix(
         Base path prefix.  Default is ``"muflow"``.
     identity_keys : list[str], optional
         List of keys in hash_dict that define the identity.
-        If None, all keys except 'workflow' are used.
+        If None, all keys except 'task' are used.
 
     Returns
     -------
     str
-        Storage prefix like ``"muflow/my.workflow/a1b2c3d4e5f6g7h8"``.
+        Storage prefix like ``"muflow/my.task/a1b2c3d4e5f6g7h8"``.
     """
     if identity_keys:
-        # Include 'workflow' in identity even if not in identity_keys
-        # to ensure different workflows with same params have different prefixes
+        # Include 'task' in identity even if not in identity_keys
+        # to ensure different tasks with same params have different prefixes
         id_dict = {k: hash_dict[k] for k in identity_keys if k in hash_dict}
-        id_dict["workflow"] = hash_dict.get("workflow", "unknown")
+        id_dict["task"] = hash_dict.get("task", "unknown")
     else:
         id_dict = hash_dict
 
     content = json.dumps(id_dict, sort_keys=True)
     h = hashlib.sha256(content.encode()).hexdigest()[:16]
-    label = hash_dict.get("workflow", "unknown")
+    label = hash_dict.get("task", "unknown")
     return f"{base_prefix}/{label}/{h}"
 
 
@@ -137,7 +137,7 @@ def compute_prefix(
 
 @runtime_checkable
 class StorageBackend(Protocol):
-    """Abstract interface for workflow file storage.
+    """Abstract interface for task file storage.
 
     Implementations must enforce the safety rules (path traversal, write-once,
     protected files) using the ``validate_filename`` and ``validate_writable``
@@ -214,6 +214,6 @@ class StorageBackend(Protocol):
     def write_manifest(self) -> None:
         """Write ``manifest.json`` listing all files written in this session.
 
-        Called by the executor after the workflow function returns (or raises).
+        Called by the executor after the task function returns (or raises).
         """
         ...

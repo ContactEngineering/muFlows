@@ -1,6 +1,6 @@
 """Testing utilities for muFlow.
 
-This module provides helper functions for running workflows in tests
+This module provides helper functions for running tasks in tests
 without manual dependency management.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 if TYPE_CHECKING:
-    from muflow.plan import WorkflowPlan
+    from muflow.plan import TaskPlan
     from muflow.pipeline import Pipeline
 
 _log = logging.getLogger(__name__)
@@ -21,30 +21,30 @@ _log = logging.getLogger(__name__)
 
 @dataclass
 class LocalExecutionResult:
-    """Result of a local workflow execution.
+    """Result of a local task execution.
 
     Attributes
     ----------
     success : bool
         Whether all nodes executed successfully.
-    plan : WorkflowPlan
+    plan : TaskPlan
         The executed plan.
     output_dir : Path
         Directory containing all outputs.
     root_output_dir : Path
-        Directory containing root workflow outputs.
+        Directory containing root task outputs.
     error : str | None
         Error message if execution failed.
     """
 
     success: bool
-    plan: "WorkflowPlan"
+    plan: "TaskPlan"
     output_dir: Path
     root_output_dir: Path
     error: Optional[str] = None
 
     def read_json(self, filename: str) -> Any:
-        """Read a JSON file from the root workflow output.
+        """Read a JSON file from the root task output.
 
         Parameters
         ----------
@@ -61,7 +61,7 @@ class LocalExecutionResult:
             return json.load(f)
 
     def read_file(self, filename: str) -> bytes:
-        """Read a file from the root workflow output.
+        """Read a file from the root task output.
 
         Parameters
         ----------
@@ -77,7 +77,7 @@ class LocalExecutionResult:
         return path.read_bytes()
 
     def list_files(self) -> list[str]:
-        """List files in the root workflow output directory.
+        """List files in the root task output directory.
 
         Returns
         -------
@@ -111,11 +111,11 @@ def run_plan_locally(
     kwargs : dict
         Pipeline parameters.
     output_dir : str or Path
-        Directory for all workflow outputs.
+        Directory for all task outputs.
     verbose : bool
         If True, print progress messages.
     use_cache : bool
-        If True (default), skip execution of workflows that have cached results.
+        If True (default), skip execution of tasks that have cached results.
 
     Returns
     -------
@@ -125,7 +125,7 @@ def run_plan_locally(
     Example
     -------
     >>> from muflow.testing import run_plan_locally
-    >>> from muflow.examples.ml_workflow import ml_pipeline
+    >>> from muflow.examples.ml_task import ml_pipeline
     >>>
     >>> result = run_plan_locally(
     ...     pipeline=ml_pipeline,

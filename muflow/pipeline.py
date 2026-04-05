@@ -1,7 +1,7 @@
-"""Explicit pipeline definitions for multi-step workflows.
+"""Explicit pipeline definitions for multi-step tasks.
 
 A Pipeline declares the full DAG topology in one place, keeping individual
-workflows as pure computational units with no knowledge of their position
+tasks as pure computational units with no knowledge of their position
 in the DAG.
 
 Example
@@ -13,12 +13,12 @@ Example
 ...     display_name="ML Pipeline",
 ...     steps={
 ...         "features": ForEach(
-...             workflow="ml.compute_features",
+...             task="ml.compute_features",
 ...             over=lambda sk, kw: [{"dataset": d} for d in kw["datasets"]],
 ...         ),
-...         "train": Step(workflow="ml.train", after=["features"]),
+...         "train": Step(task="ml.train", after=["features"]),
 ...         "reports": ForEach(
-...             workflow="ml.report",
+...             task="ml.report",
 ...             after=["train"],
 ...             over=lambda sk, kw: [{"format": f} for f in ("pdf", "csv")],
 ...         ),
@@ -35,7 +35,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Union
 
-from muflow.plan import WorkflowNode, WorkflowPlan
+from muflow.plan import TaskNode, TaskPlan
 from muflow.registry import get as get_entry
 from muflow.storage import compute_prefix
 
@@ -51,8 +51,8 @@ class Step:
 
     Parameters
     ----------
-    workflow : str
-        Name of the registered workflow to execute.
+    task : str
+        Name of the registered task to execute.
     after : list[str]
         Names of steps that must complete before this one.
     kwargs_map : callable, optional
@@ -60,7 +60,7 @@ class Step:
         step-specific kwargs from the pipeline kwargs.
     """
 
-    workflow: str
+    task: str
     after: list[str] = field(default_factory=list)
     kwargs_map: Optional[Callable[[str, dict], dict]] = None
 
@@ -71,8 +71,8 @@ class ForEach:
 
     Parameters
     ----------
-    workflow : str
-        Name of the registered workflow to execute (once per item).
+    task : str
+        Name of the registered task to execute (once per item).
     over : callable
         Function ``(subject_key, kwargs) -> list[dict]`` returning
         per-job kwargs.  Each dict is merged with the pipeline kwargs.
@@ -80,20 +80,20 @@ class ForEach:
         Names of steps that must complete before this one.
     """
 
-    workflow: str
+    task: str
     over: OverFunc
     after: list[str] = field(default_factory=list)
 
 
 @dataclass
 class Pipeline:
-    """Explicit DAG topology for a multi-step workflow.
+    """Explicit DAG topology for a multi-step task.
 
     Parameters
     ----------
     name : str
         Unique identifier for this pipeline (used as the sentinel
-        workflow name when the final step has multiple nodes).
+        task name when the final step has multiple nodes).
     display_name : str
         Human-readable name.
     steps : dict[str, Step | ForEach]
@@ -107,10 +107,10 @@ class Pipeline:
     ...     name="ml.pipeline",
     ...     steps={
     ...         "features": ForEach(
-    ...             workflow="ml.features",
+    ...             task="ml.features",
     ...             over=lambda sk, kw: [{"id": i} for i in range(3)],
     ...         ),
-    ...         "train": Step(workflow="ml.train", after=["features"]),
+    ...         "train": Step(task="ml.train", after=["features"]),
     ...     },
     ... )
     >>> plan = pipeline.build_plan("tag:1", {})
@@ -126,8 +126,8 @@ class Pipeline:
         kwargs: dict,
         is_cached: Optional[Callable[[str, str, dict], bool]] = None,
         base_prefix: str = "muflow",
-    ) -> WorkflowPlan:
-        """Compile this pipeline into a :class:`WorkflowPlan`.
+    ) -> TaskPlan:
+        """Compile this pipeline into a :class:`TaskPlan`.
 
         Parameters
         ----------
@@ -136,20 +136,20 @@ class Pipeline:
         kwargs : dict
             Pipeline-level parameters, merged with per-step kwargs.
         is_cached : callable, optional
-            ``(workflow_name, subject_key, kwargs) -> bool``.
+            ``(task_name, subject_key, kwargs) -> bool``.
             Default: always False (no caching).
         base_prefix : str
             Base prefix for content-addressed storage paths.
 
         Returns
         -------
-        WorkflowPlan
+        TaskPlan
             Complete execution DAG ready for any backend.
         """
         self._validate_step_names()
         is_cached = is_cached or (lambda *_: False)
 
-        nodes: Dict[str, WorkflowNode] = {}
+        nodes: Dict[str, TaskNode] = {}
         # step_name -> list of node keys produced by that step
         step_node_keys: Dict[str, List[str]] = {}
 
@@ -177,19 +177,19 @@ class Pipeline:
             f"root={root_key[:50]}..."
         )
 
-        return WorkflowPlan(nodes=nodes, root_key=root_key)
+        return TaskPlan(nodes=nodes, root_key=root_key)
 
     def _build_step_nodes(
         self,
         step_name: str,
-        nodes: Dict[str, WorkflowNode],
+        nodes: Dict[str, TaskNode],
         step_node_keys: Dict[str, List[str]],
         subject_key: str,
         kwargs: dict,
         is_cached: Callable,
         base_prefix: str,
     ) -> List[str]:
-        """Create WorkflowNodes for a single pipeline step.
+        """Create TaskNodes for a single pipeline step.
 
         Returns the list of node keys created.
         """
@@ -217,13 +217,13 @@ class Pipeline:
         step_keys: List[str] = []
         for job_kw in job_kwargs_list:
             merged_kwargs = {**kwargs, **job_kw}
-            workflow_name = step.workflow
+            task_name = step.task
 
-            entry = get_entry(workflow_name)
+            entry = get_entry(task_name)
             identity_keys = entry.identity_keys if entry else None
 
             storage_prefix = compute_prefix(
-                {"workflow": workflow_name, "subject": subject_key,
+                {"task": task_name, "subject": subject_key,
                  **merged_kwargs},
                 base_prefix=base_prefix,
                 identity_keys=identity_keys,
@@ -233,16 +233,16 @@ class Pipeline:
             if entry and entry.outputs and hasattr(entry.outputs, "files"):
                 output_files = list(entry.outputs.files.keys())
 
-            node = WorkflowNode(
+            node = TaskNode(
                 key=storage_prefix,
-                function=workflow_name,
+                function=task_name,
                 subject_key=subject_key,
                 kwargs=merged_kwargs,
                 storage_prefix=storage_prefix,
                 depends_on=list(upstream_keys),
                 depended_on_by=[],
                 output_files=output_files,
-                cached=is_cached(workflow_name, subject_key, merged_kwargs),
+                cached=is_cached(task_name, subject_key, merged_kwargs),
                 dependency_access_map=dict(dep_access_map),
             )
             nodes[storage_prefix] = node
@@ -254,7 +254,7 @@ class Pipeline:
     def _build_access_map(
         after_refs: list[str],
         step_node_keys: Dict[str, List[str]],
-        nodes: Dict[str, WorkflowNode],
+        nodes: Dict[str, TaskNode],
     ) -> Dict[str, str]:
         """Build the dependency access map for a step."""
         dep_access_map: Dict[str, str] = {}
@@ -312,7 +312,7 @@ class Pipeline:
         self,
         ordered: list[str],
         step_node_keys: Dict[str, List[str]],
-        nodes: Dict[str, WorkflowNode],
+        nodes: Dict[str, TaskNode],
         subject_key: str,
         kwargs: dict,
         base_prefix: str,
@@ -331,10 +331,10 @@ class Pipeline:
 
         # Create sentinel
         sentinel_key = compute_prefix(
-            {"workflow": self.name, "subject": subject_key, **kwargs},
+            {"task": self.name, "subject": subject_key, **kwargs},
             base_prefix=base_prefix,
         )
-        sentinel = WorkflowNode(
+        sentinel = TaskNode(
             key=sentinel_key,
             function=self.name,
             subject_key=subject_key,

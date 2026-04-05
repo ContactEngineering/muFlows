@@ -13,7 +13,7 @@ Step Functions is the AWS equivalent of a Celery canvas:
 
 Architecture
 ------------
-submit_plan() translates the WorkflowPlan DAG into an ASL state machine:
+submit_plan() translates the TaskPlan DAG into an ASL state machine:
 
 1. Topologically sort nodes into levels (same algorithm as CeleryBackend).
 2. A single-node level becomes a Task state; a multi-node level becomes a
@@ -36,7 +36,7 @@ import uuid
 from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
-    from muflow.plan import WorkflowNode, WorkflowPlan
+    from muflow.plan import TaskNode, TaskPlan
 
 _log = logging.getLogger(__name__)
 
@@ -47,9 +47,9 @@ except ImportError:
 
 
 class StepFunctionsBackend:
-    """Execute workflow plans via AWS Step Functions + Lambda.
+    """Execute task plans via AWS Step Functions + Lambda.
 
-    Translates a WorkflowPlan DAG into an ASL state machine, registers it
+    Translates a TaskPlan DAG into an ASL state machine, registers it
     with Step Functions, and starts an execution.  Returns immediately;
     AWS owns the orchestration from that point.
 
@@ -60,10 +60,10 @@ class StepFunctionsBackend:
     Parameters
     ----------
     function_arn : str
-        ARN of the Lambda function that executes individual workflow nodes.
+        ARN of the Lambda function that executes individual task nodes.
         Create it with :func:`create_lambda_handler`.
     bucket : str
-        S3 bucket for workflow data.
+        S3 bucket for task data.
     role_arn : str
         IAM role ARN that Step Functions uses to invoke Lambda.
         The role must have ``lambda:InvokeFunction`` permission.
@@ -83,7 +83,7 @@ class StepFunctionsBackend:
     >>>
     >>> backend = StepFunctionsBackend(
     ...     function_arn="arn:aws:lambda:us-east-1:123456789:function:muflow-worker",
-    ...     bucket="my-workflow-bucket",
+    ...     bucket="my-task-bucket",
     ...     role_arn="arn:aws:iam::123456789:role/StepFunctionsLambdaRole",
     ... )
     >>> plan = my_pipeline.build_plan("dataset:42", {"param": "value"})
@@ -117,7 +117,7 @@ class StepFunctionsBackend:
 
     def submit_plan(
         self,
-        plan: "WorkflowPlan",
+        plan: "TaskPlan",
         on_node_start: Optional[Callable[[str], None]] = None,
         on_node_complete: Optional[Callable[[str], None]] = None,
         on_node_failure: Optional[Callable[[str, str], None]] = None,
@@ -133,8 +133,8 @@ class StepFunctionsBackend:
 
         Parameters
         ----------
-        plan : WorkflowPlan
-            Complete workflow plan.
+        plan : TaskPlan
+            Complete task plan.
         on_node_start, on_node_complete, on_node_failure : callable, optional
             Ignored (async execution).  A warning is logged if any are passed.
 
@@ -227,7 +227,7 @@ class StepFunctionsBackend:
         """Derive a valid Step Functions state machine name from a root key.
 
         AWS state machine names: 1–80 chars, ``[A-Za-z0-9_-]`` only.
-        ``root_key`` looks like ``"muflow/my.workflow/a1b2c3d4e5f6g7h8"``; we
+        ``root_key`` looks like ``"muflow/my.task/a1b2c3d4e5f6g7h8"``; we
         use the hash suffix for uniqueness.
         """
         suffix = root_key.rsplit("/", 1)[-1] if "/" in root_key else root_key
@@ -280,7 +280,7 @@ class StepFunctionsBackend:
             f"State machine '{name}' exists but could not be located."
         )
 
-    def _compute_levels(self, plan: "WorkflowPlan") -> list[list["WorkflowNode"]]:
+    def _compute_levels(self, plan: "TaskPlan") -> list[list["TaskNode"]]:
         """Group non-cached nodes by execution level (topological sort).
 
         Level 0 contains nodes whose dependencies are all already cached or
@@ -289,7 +289,7 @@ class StepFunctionsBackend:
 
         Raises ``ValueError`` on circular dependencies.
         """
-        levels: list[list["WorkflowNode"]] = []
+        levels: list[list["TaskNode"]] = []
         completed = {k for k, n in plan.nodes.items() if n.cached}
         remaining = set(plan.nodes.keys()) - completed
 
@@ -311,8 +311,8 @@ class StepFunctionsBackend:
 
     def _build_asl(
         self,
-        levels: list[list["WorkflowNode"]],
-        plan: "WorkflowPlan",
+        levels: list[list["TaskNode"]],
+        plan: "TaskPlan",
     ) -> Optional[dict]:
         """Build an ASL state machine definition from execution levels.
 
@@ -347,7 +347,7 @@ class StepFunctionsBackend:
             "States": states,
         }
 
-    def _task_state(self, node: "WorkflowNode", plan: "WorkflowPlan") -> dict:
+    def _task_state(self, node: "TaskNode", plan: "TaskPlan") -> dict:
         """ASL Task state that invokes Lambda for a single node."""
         return {
             "Type": "Task",
@@ -373,7 +373,7 @@ class StepFunctionsBackend:
         }
 
     def _parallel_state(
-        self, nodes: list["WorkflowNode"], plan: "WorkflowPlan"
+        self, nodes: list["TaskNode"], plan: "TaskPlan"
     ) -> dict:
         """ASL Parallel state that runs multiple nodes concurrently."""
         branches = []
@@ -390,16 +390,16 @@ class StepFunctionsBackend:
             "ResultPath": None,
         }
 
-    def _node_payload(self, node: "WorkflowNode", plan: "WorkflowPlan") -> dict:
+    def _node_payload(self, node: "TaskNode", plan: "TaskPlan") -> dict:
         """Build the Lambda event payload for a node.
 
         Dependency prefixes are keyed by their *access keys* (e.g.
-        ``"features:0"``) so that workflow code can call
+        ``"features:0"``) so that task code can call
         ``ctx.dependency("features:0")`` correctly.
         """
         dependency_prefixes = node.dependency_access_map
         return {
-            "workflow_name": node.function,
+            "task_name": node.function,
             "kwargs": node.kwargs,
             "storage_prefix": node.storage_prefix,
             "dependency_prefixes": dependency_prefixes,
@@ -411,8 +411,8 @@ class StepFunctionsBackend:
 # ── Lambda node executor ───────────────────────────────────────────────────
 
 
-def create_lambda_handler(workflow_registry: Optional[dict] = None):
-    """Create a Lambda handler function for workflow node execution.
+def create_lambda_handler(task_registry: Optional[dict] = None):
+    """Create a Lambda handler function for task node execution.
 
     The handler is the compute half of the Step Functions + Lambda
     architecture: Step Functions decides *when* to call it; this function
@@ -420,8 +420,8 @@ def create_lambda_handler(workflow_registry: Optional[dict] = None):
 
     Parameters
     ----------
-    workflow_registry : dict, optional
-        Mapping ``{workflow_name: WorkflowEntry}``.
+    task_registry : dict, optional
+        Mapping ``{task_name: TaskEntry}``.
         Defaults to ``muflow.registry.get_all()`` at call time.
 
     Returns
@@ -435,25 +435,25 @@ def create_lambda_handler(workflow_registry: Optional[dict] = None):
 
         from muflow.backends.step_functions import create_lambda_handler
 
-        # Register all workflows before creating the handler
-        import myapp.workflows  # noqa: F401 (side-effect: registers workflows)
+        # Register all tasks before creating the handler
+        import myapp.tasks  # noqa: F401 (side-effect: registers tasks)
 
         handler = create_lambda_handler()
     """
     from muflow import registry
-    from muflow.context import WorkflowContext
-    from muflow.executor import ExecutionPayload, execute_workflow
+    from muflow.context import TaskContext
+    from muflow.executor import ExecutionPayload, execute_task
     from muflow.storage import S3StorageBackend
 
-    if workflow_registry is None:
-        workflow_registry = registry.get_all()
+    if task_registry is None:
+        task_registry = registry.get_all()
 
     def handler(event: dict, context) -> dict:
-        """Execute a single workflow node.
+        """Execute a single task node.
 
         Expected event keys
         -------------------
-        workflow_name : str
+        task_name : str
         kwargs : dict
         storage_prefix : str
             S3 key prefix for this node's outputs.
@@ -471,21 +471,21 @@ def create_lambda_handler(workflow_registry: Optional[dict] = None):
         Raises
         ------
         ValueError
-            If the workflow name is not in the registry.
+            If the task name is not in the registry.
         RuntimeError
-            If workflow execution fails.
+            If task execution fails.
         """
-        workflow_name = event["workflow_name"]
+        task_name = event["task_name"]
         node_key = event["node_key"]
         bucket = event["bucket"]
 
-        _log.info(f"Lambda handler: {workflow_name} (node={node_key[:16]}...)")
+        _log.info(f"Lambda handler: {task_name} (node={node_key[:16]}...)")
 
-        if workflow_name not in workflow_registry:
-            raise ValueError(f"Unknown workflow: {workflow_name!r}")
+        if task_name not in task_registry:
+            raise ValueError(f"Unknown task: {task_name!r}")
 
         payload = ExecutionPayload(
-            workflow_name=workflow_name,
+            task_name=task_name,
             kwargs=event["kwargs"],
             storage_prefix=event["storage_prefix"],
             dependency_prefixes=event.get("dependency_prefixes", {}),
@@ -497,16 +497,16 @@ def create_lambda_handler(workflow_registry: Optional[dict] = None):
             for key, prefix in payload.dependency_prefixes.items()
         }
 
-        ctx = WorkflowContext(
+        ctx = TaskContext(
             storage=storage,
             kwargs=payload.kwargs,
             dependency_storages=dep_storages,
         )
 
-        result = execute_workflow(
+        result = execute_task(
             payload=payload,
             context=ctx,
-            get_entry=lambda name: workflow_registry[name],
+            get_entry=lambda name: task_registry[name],
         )
 
         if not result.success:

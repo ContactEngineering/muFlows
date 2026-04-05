@@ -1,14 +1,14 @@
 """Celery execution backend with parallel DAG orchestration.
 
-This module provides a CeleryBackend that executes workflow plans using
+This module provides a CeleryBackend that executes task plans using
 Celery's chord and group primitives for parallel execution.
 
 Architecture
 ------------
-- submit_plan() converts the WorkflowPlan DAG into Celery chord/group structures
+- submit_plan() converts the TaskPlan DAG into Celery chord/group structures
 - Nodes at the same "level" (same dependency depth) run in parallel via group()
 - Levels are chained together via chord() so each level waits for the previous
-- Workers execute individual nodes via execute_workflow()
+- Workers execute individual nodes via execute_task()
 
 Example DAG
 -----------
@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
-    from muflow.plan import WorkflowNode, WorkflowPlan
+    from muflow.plan import TaskNode, TaskPlan
 
 _log = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ _log = logging.getLogger(__name__)
 class CeleryBackend:
     """Celery backend with parallel DAG orchestration.
 
-    Converts WorkflowPlan into Celery chord/group structures for efficient
+    Converts TaskPlan into Celery chord/group structures for efficient
     parallel execution. Nodes at the same dependency level run in parallel.
 
     Parameters
@@ -48,7 +48,7 @@ class CeleryBackend:
     celery_app
         Celery application instance.
     bucket : str
-        S3 bucket for workflow I/O.
+        S3 bucket for task I/O.
     base_prefix : str
         S3 key prefix used when building the plan.
         Default: ``"muflow"``.
@@ -83,11 +83,11 @@ class CeleryBackend:
 
     def submit_plan(
         self,
-        plan: "WorkflowPlan",
+        plan: "TaskPlan",
         on_node_complete: Optional[Callable[[str], None]] = None,
         on_node_failure: Optional[Callable[[str, str], None]] = None,
     ) -> str:
-        """Submit a workflow plan for parallel execution.
+        """Submit a task plan for parallel execution.
 
         Converts the DAG into Celery chord/group structures:
         - Nodes with no dependencies (level 0) run first in parallel
@@ -96,8 +96,8 @@ class CeleryBackend:
 
         Parameters
         ----------
-        plan : WorkflowPlan
-            Complete workflow plan.
+        plan : TaskPlan
+            Complete task plan.
         on_node_complete : callable, optional
             Not directly supported - use Celery signals or callbacks task.
         on_node_failure : callable, optional
@@ -116,16 +116,16 @@ class CeleryBackend:
             f"in {len(levels)} levels"
         )
 
-        # Build Celery workflow from levels
-        celery_workflow = self._build_celery_workflow(levels, plan)
+        # Build Celery task from levels
+        celery_task = self._build_celery_task(levels, plan)
 
-        if celery_workflow is None:
+        if celery_task is None:
             # All nodes are cached - nothing to execute
             _log.info(f"Plan {plan.root_key[:16]}... - all nodes cached")
             return f"cached-{plan.root_key}"
 
-        # Submit the workflow
-        result = celery_workflow.apply_async()
+        # Submit the task
+        result = celery_task.apply_async()
         self._plan_results[result.id] = result
 
         _log.info(f"Submitted plan as Celery task {result.id}")
@@ -187,7 +187,7 @@ class CeleryBackend:
         self._app.control.revoke(plan_id, terminate=True)
         _log.info(f"Cancelled plan {plan_id}")
 
-    def _compute_levels(self, plan: "WorkflowPlan") -> list[list["WorkflowNode"]]:
+    def _compute_levels(self, plan: "TaskPlan") -> list[list["TaskNode"]]:
         """Group nodes by execution level (topological sort).
 
         Level 0: nodes with no dependencies (leaf nodes)
@@ -195,15 +195,15 @@ class CeleryBackend:
 
         Parameters
         ----------
-        plan : WorkflowPlan
-            The workflow plan.
+        plan : TaskPlan
+            The task plan.
 
         Returns
         -------
-        list[list[WorkflowNode]]
+        list[list[TaskNode]]
             Nodes grouped by execution level.
         """
-        levels: list[list["WorkflowNode"]] = []
+        levels: list[list["TaskNode"]] = []
         remaining = set(plan.nodes.keys())
         completed = {k for k, n in plan.nodes.items() if n.cached}
 
@@ -230,24 +230,24 @@ class CeleryBackend:
 
         return levels
 
-    def _build_celery_workflow(
+    def _build_celery_task(
         self,
-        levels: list[list["WorkflowNode"]],
-        plan: "WorkflowPlan",
+        levels: list[list["TaskNode"]],
+        plan: "TaskPlan",
     ):
         """Convert execution levels into Celery chord/chain structure.
 
         Parameters
         ----------
-        levels : list[list[WorkflowNode]]
+        levels : list[list[TaskNode]]
             Nodes grouped by execution level.
-        plan : WorkflowPlan
-            The workflow plan (for dependency prefixes).
+        plan : TaskPlan
+            The task plan (for dependency prefixes).
 
         Returns
         -------
         celery.canvas.Signature or None
-            Celery workflow signature, or None if all nodes are cached.
+            Celery task signature, or None if all nodes are cached.
         """
         from celery import chord, group
 
@@ -283,15 +283,15 @@ class CeleryBackend:
 
         return result
 
-    def _make_node_task(self, node: "WorkflowNode", plan: "WorkflowPlan"):
+    def _make_node_task(self, node: "TaskNode", plan: "TaskPlan"):
         """Create a Celery task signature for a node.
 
         Parameters
         ----------
-        node : WorkflowNode
+        node : TaskNode
             The node to create a task for.
-        plan : WorkflowPlan
-            The workflow plan (for dependency prefixes).
+        plan : TaskPlan
+            The task plan (for dependency prefixes).
 
         Returns
         -------
@@ -303,7 +303,7 @@ class CeleryBackend:
 
         # Build payload dict
         payload_dict = {
-            "workflow_name": node.function,
+            "task_name": node.function,
             "kwargs": node.kwargs,
             "storage_prefix": node.storage_prefix,
             "dependency_prefixes": dependency_prefixes,
@@ -324,21 +324,21 @@ class CeleryBackend:
 
 def create_celery_task(
     celery_app,
-    workflow_registry: Optional[dict] = None,
+    task_registry: Optional[dict] = None,
     task_name: str = "muflow.execute_node",
 ):
-    """Create a Celery task for executing workflow nodes.
+    """Create a Celery task for executing task nodes.
 
     This is a factory function that creates a Celery task configured
-    with a registry of available workflow implementations. The task
+    with a registry of available task implementations. The task
     is called by CeleryBackend for each node in the plan.
 
     Parameters
     ----------
     celery_app
         Celery application instance.
-    workflow_registry : dict, optional
-        Mapping from workflow name to WorkflowEntry (or legacy class).
+    task_registry : dict, optional
+        Mapping from task name to TaskEntry (or legacy class).
         Defaults to `muflow.registry.get_all()`.
     task_name : str
         Name for the Celery task. Defaults to "muflow.execute_node".
@@ -358,12 +358,12 @@ def create_celery_task(
     >>> task = create_celery_task(app)
     """
     from muflow import registry
-    from muflow.context import WorkflowContext
-    from muflow.executor import ExecutionPayload, execute_workflow
+    from muflow.context import TaskContext
+    from muflow.executor import ExecutionPayload, execute_task
     from muflow.storage import S3StorageBackend
 
-    if workflow_registry is None:
-        workflow_registry = registry.get_all()
+    if task_registry is None:
+        task_registry = registry.get_all()
 
     @celery_app.task(name=task_name, bind=True)
     def execute_node_task(
@@ -372,7 +372,7 @@ def create_celery_task(
         payload_dict: dict,
         bucket: str,
     ):
-        """Execute a single workflow node.
+        """Execute a single task node.
 
         Parameters
         ----------
@@ -393,12 +393,12 @@ def create_celery_task(
         payload = ExecutionPayload.from_dict(payload_dict)
 
         _log.info(
-            f"execute_node_task: Starting {payload.workflow_name} "
+            f"execute_node_task: Starting {payload.task_name} "
             f"(node_key={node_key[:16]}..., task_id={self.request.id})"
         )
 
-        if payload.workflow_name not in workflow_registry:
-            error_msg = f"Unknown workflow: {payload.workflow_name}"
+        if payload.task_name not in task_registry:
+            error_msg = f"Unknown task: {payload.task_name}"
             _log.error(f"execute_node_task: {error_msg}")
             raise ValueError(error_msg)
 
@@ -409,17 +409,17 @@ def create_celery_task(
             for key, prefix in payload.dependency_prefixes.items()
         }
 
-        ctx = WorkflowContext(
+        ctx = TaskContext(
             storage=storage,
             kwargs=payload.kwargs,
             dependency_storages=dep_storages,
         )
 
         # Execute
-        result = execute_workflow(
+        result = execute_task(
             payload=payload,
             context=ctx,
-            get_entry=lambda name: workflow_registry[name],
+            get_entry=lambda name: task_registry[name],
         )
 
         # Write execution metadata to S3
@@ -437,12 +437,12 @@ def create_celery_task(
 
         if result.success:
             _log.info(
-                f"execute_node_task: Completed {payload.workflow_name} "
+                f"execute_node_task: Completed {payload.task_name} "
                 f"(node_key={node_key[:16]}...)"
             )
         else:
             _log.error(
-                f"execute_node_task: Failed {payload.workflow_name} "
+                f"execute_node_task: Failed {payload.task_name} "
                 f"(node_key={node_key[:16]}...): {result.error_message}"
             )
             raise RuntimeError(result.error_message)

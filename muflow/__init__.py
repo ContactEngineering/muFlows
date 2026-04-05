@@ -1,25 +1,25 @@
-"""muflow - Backend-agnostic workflow execution engine.
+"""muflow - Backend-agnostic task execution engine.
 
-muflow provides abstractions for defining and executing workflows that can
+muflow provides abstractions for defining and executing tasks that can
 run on multiple backends (Celery, AWS Lambda, AWS Step Functions) without
 modification.
 
-Workflows are registered as pure computational units via
-``@register_workflow``.  DAG topology is declared separately via
-:class:`Pipeline`, which compiles to a :class:`WorkflowPlan` that any
+Tasks are registered as pure computational units via
+``@register_task``.  DAG topology is declared separately via
+:class:`Pipeline`, which compiles to a :class:`TaskPlan` that any
 backend can execute.
 
 Example
 -------
->>> from muflow import register_workflow, Pipeline, Step, ForEach
+>>> from muflow import register_task, Pipeline, Step, ForEach
 >>>
->>> @register_workflow(name="ml.train")
+>>> @register_task(name="ml.train")
 ... def train(context):
 ...     context.save_json("model.json", {"weights": []})
 >>>
 >>> pipeline = Pipeline(
 ...     name="ml.pipeline",
-...     steps={"train": Step(workflow="ml.train")},
+...     steps={"train": Step(task="ml.train")},
 ... )
 >>> plan = pipeline.build_plan("tag:1", {})
 """
@@ -33,22 +33,22 @@ from muflow import registry
 from muflow.backends import ExecutionBackend, LocalBackend
 
 # Core context
-from muflow.context import WorkflowContext, create_local_context
+from muflow.context import TaskContext, create_local_context
 
 # Executor
-from muflow.executor import ExecutionPayload, ExecutionResult, execute_workflow
+from muflow.executor import ExecutionPayload, ExecutionResult, execute_task
 
 # Output schema
 from muflow.outputs import OutputFile, get_outputs_schema
 
 # Plan data structures
-from muflow.plan import WorkflowNode, WorkflowPlan
+from muflow.plan import TaskNode, TaskPlan
 
 # Pipeline
 from muflow.pipeline import ForEach, Pipeline, Step
 
 # Registry
-from muflow.registry import IdentityKey, WorkflowEntry, register_workflow
+from muflow.registry import IdentityKey, TaskEntry, register_task
 
 # Storage backends
 from muflow.storage import (
@@ -83,7 +83,7 @@ __all__ = [
     "S3StorageBackend",
     "compute_prefix",
     # Context
-    "WorkflowContext",
+    "TaskContext",
     "create_local_context",
     # Outputs
     "OutputFile",
@@ -91,15 +91,15 @@ __all__ = [
     # Registry
     "registry",
     "IdentityKey",
-    "WorkflowEntry",
-    "register_workflow",
+    "TaskEntry",
+    "register_task",
     # Executor
     "ExecutionPayload",
     "ExecutionResult",
-    "execute_workflow",
+    "execute_task",
     # Plan
-    "WorkflowNode",
-    "WorkflowPlan",
+    "TaskNode",
+    "TaskPlan",
     # Pipeline
     "Pipeline",
     "Step",

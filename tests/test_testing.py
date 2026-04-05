@@ -5,34 +5,34 @@ from pathlib import Path
 
 import pytest
 
-from muflow import register_workflow, run_plan_locally
+from muflow import register_task, run_plan_locally
 from muflow.pipeline import ForEach, Pipeline, Step
 from muflow.registry import get, unregister
 
 
 @pytest.fixture(autouse=True)
-def register_test_workflows():
-    """Register test workflows for each test."""
+def register_test_tasks():
+    """Register test tasks for each test."""
     for name in [
-        "test.testing.simple_workflow",
-        "test.testing.workflow_with_deps",
-        "test.testing.failing_workflow",
+        "test.testing.simple_task",
+        "test.testing.task_with_deps",
+        "test.testing.failing_task",
     ]:
         if get(name) is not None:
             unregister(name)
 
-    @register_workflow(name="test.testing.simple_workflow")
-    def simple_workflow(context):
-        """Simple workflow that writes a result."""
+    @register_task(name="test.testing.simple_task")
+    def simple_task(context):
+        """Simple task that writes a result."""
         params = context.kwargs
         context.save_json("result.json", {
             "id": params.get("id", "unknown"),
             "status": "completed",
         })
 
-    @register_workflow(name="test.testing.workflow_with_deps")
-    def workflow_with_deps(context):
-        """Workflow that reads from dependencies."""
+    @register_task(name="test.testing.task_with_deps")
+    def task_with_deps(context):
+        """Task that reads from dependencies."""
         dep_results = []
         for key in context.dependency_keys():
             dep = context.dependency(key)
@@ -44,9 +44,9 @@ def register_test_workflows():
             "status": "completed",
         })
 
-    @register_workflow(name="test.testing.failing_workflow")
-    def failing_test_workflow(context):
-        """Workflow that always fails."""
+    @register_task(name="test.testing.failing_task")
+    def failing_test_task(context):
+        """Task that always fails."""
         raise ValueError("Intentional test failure")
 
     yield
@@ -58,7 +58,7 @@ def _simple_pipeline():
     return Pipeline(
         name="test.simple_pipeline",
         steps={
-            "simple": Step(workflow="test.testing.simple_workflow"),
+            "simple": Step(task="test.testing.simple_task"),
         },
     )
 
@@ -68,14 +68,14 @@ def _pipeline_with_deps():
         name="test.deps_pipeline",
         steps={
             "deps": ForEach(
-                workflow="test.testing.simple_workflow",
+                task="test.testing.simple_task",
                 over=lambda sk, kw: [
                     {"id": f"dep_{i}"}
                     for i in range(kw.get("num_deps", 2))
                 ],
             ),
             "main": Step(
-                workflow="test.testing.workflow_with_deps",
+                task="test.testing.task_with_deps",
                 after=["deps"],
             ),
         },
@@ -86,7 +86,7 @@ def _failing_pipeline():
     return Pipeline(
         name="test.failing_pipeline",
         steps={
-            "fail": Step(workflow="test.testing.failing_workflow"),
+            "fail": Step(task="test.testing.failing_task"),
         },
     )
 
@@ -94,8 +94,8 @@ def _failing_pipeline():
 class TestRunPlanLocally:
     """Tests for run_plan_locally function."""
 
-    def test_run_simple_workflow(self):
-        """Should execute a simple workflow and return result."""
+    def test_run_simple_task(self):
+        """Should execute a simple task and return result."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
                 pipeline=_simple_pipeline(),
@@ -137,8 +137,8 @@ class TestRunPlanLocally:
             files = result.list_files()
             assert "result.json" in files
 
-    def test_workflow_with_dependencies(self):
-        """Should execute workflow with dependencies."""
+    def test_task_with_dependencies(self):
+        """Should execute task with dependencies."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
                 pipeline=_pipeline_with_deps(),
@@ -154,8 +154,8 @@ class TestRunPlanLocally:
             assert data["status"] == "completed"
             assert len(data["dependencies"]) == 3
 
-    def test_failed_workflow(self):
-        """Should handle workflow failure gracefully."""
+    def test_failed_task(self):
+        """Should handle task failure gracefully."""
         with tempfile.TemporaryDirectory() as tmpdir:
             result = run_plan_locally(
                 pipeline=_failing_pipeline(),

@@ -2,7 +2,7 @@
 
 import pytest
 
-from muflow import register_workflow
+from muflow import register_task
 from muflow.pipeline import ForEach, Pipeline, Step
 from muflow.registry import clear
 
@@ -16,9 +16,9 @@ def clean_registry():
 
 
 def _register_noop(name):
-    """Register a no-op workflow for testing."""
+    """Register a no-op task for testing."""
 
-    @register_workflow(name=name)
+    @register_task(name=name)
     def noop(context):
         pass
 
@@ -33,7 +33,7 @@ class TestPipelineBuildPlan:
         _register_noop("test.single")
         p = Pipeline(
             name="p.single",
-            steps={"only": Step(workflow="test.single")},
+            steps={"only": Step(task="test.single")},
         )
         plan = p.build_plan("tag:1", {"x": 1})
 
@@ -50,8 +50,8 @@ class TestPipelineBuildPlan:
         p = Pipeline(
             name="p.seq",
             steps={
-                "first": Step(workflow="test.a"),
-                "second": Step(workflow="test.b", after=["first"]),
+                "first": Step(task="test.a"),
+                "second": Step(task="test.b", after=["first"]),
             },
         )
         plan = p.build_plan("tag:1", {})
@@ -70,7 +70,7 @@ class TestPipelineBuildPlan:
             name="p.fan",
             steps={
                 "work": ForEach(
-                    workflow="test.worker",
+                    task="test.worker",
                     over=lambda sk, kw: [{"i": j} for j in range(3)],
                 ),
             },
@@ -90,10 +90,10 @@ class TestPipelineBuildPlan:
             name="p.fan_in",
             steps={
                 "work": ForEach(
-                    workflow="test.worker",
+                    task="test.worker",
                     over=lambda sk, kw: [{"i": j} for j in range(3)],
                 ),
-                "agg": Step(workflow="test.aggregate", after=["work"]),
+                "agg": Step(task="test.aggregate", after=["work"]),
             },
         )
         plan = p.build_plan("tag:1", {})
@@ -114,8 +114,8 @@ class TestPipelineBuildPlan:
         p = Pipeline(
             name="p.dep",
             steps={
-                "first": Step(workflow="test.a"),
-                "second": Step(workflow="test.b", after=["first"]),
+                "first": Step(task="test.a"),
+                "second": Step(task="test.b", after=["first"]),
             },
         )
         plan = p.build_plan("tag:1", {})
@@ -133,10 +133,10 @@ class TestPipelineBuildPlan:
             name="p.dep_fan",
             steps={
                 "work": ForEach(
-                    workflow="test.worker",
+                    task="test.worker",
                     over=lambda sk, kw: [{"i": j} for j in range(3)],
                 ),
-                "agg": Step(workflow="test.agg", after=["work"]),
+                "agg": Step(task="test.agg", after=["work"]),
             },
         )
         plan = p.build_plan("tag:1", {})
@@ -153,7 +153,7 @@ class TestPipelineBuildPlan:
             name="p.merge",
             steps={
                 "work": ForEach(
-                    workflow="test.worker",
+                    task="test.worker",
                     over=lambda sk, kw: [{"extra": "val"}],
                 ),
             },
@@ -172,7 +172,7 @@ class TestPipelineCaching:
         _register_noop("test.a")
         p = Pipeline(
             name="p.cache",
-            steps={"only": Step(workflow="test.a")},
+            steps={"only": Step(task="test.a")},
         )
         plan = p.build_plan(
             "tag:1", {},
@@ -189,8 +189,8 @@ class TestPipelineCaching:
         p = Pipeline(
             name="p.cache2",
             steps={
-                "first": Step(workflow="test.a"),
-                "second": Step(workflow="test.b", after=["first"]),
+                "first": Step(task="test.a"),
+                "second": Step(task="test.b", after=["first"]),
             },
         )
         # First step is cached
@@ -212,7 +212,7 @@ class TestPipelineValidation:
         with pytest.raises(ValueError, match="must not contain ':'"):
             p = Pipeline(
                 name="p.bad",
-                steps={"bad:name": Step(workflow="test.x")},
+                steps={"bad:name": Step(task="test.x")},
             )
             p.build_plan("tag:1", {})
 
@@ -222,7 +222,7 @@ class TestPipelineValidation:
         p = Pipeline(
             name="p.bad_ref",
             steps={
-                "only": Step(workflow="test.a", after=["nonexistent"]),
+                "only": Step(task="test.a", after=["nonexistent"]),
             },
         )
         with pytest.raises(ValueError, match="unknown step"):
@@ -235,8 +235,8 @@ class TestPipelineValidation:
         p = Pipeline(
             name="p.cycle",
             steps={
-                "a": Step(workflow="test.a", after=["b"]),
-                "b": Step(workflow="test.b", after=["a"]),
+                "a": Step(task="test.a", after=["b"]),
+                "b": Step(task="test.b", after=["a"]),
             },
         )
         with pytest.raises(ValueError, match="Circular dependency"):
@@ -255,11 +255,11 @@ class TestPipelineReadyNodesProgression:
             name="p.stages",
             steps={
                 "work": ForEach(
-                    workflow="test.worker",
+                    task="test.worker",
                     over=lambda sk, kw: [{"i": j} for j in range(3)],
                 ),
-                "agg": Step(workflow="test.aggregate", after=["work"]),
-                "report": Step(workflow="test.report", after=["agg"]),
+                "agg": Step(task="test.aggregate", after=["work"]),
+                "report": Step(task="test.report", after=["agg"]),
             },
         )
         plan = p.build_plan("tag:1", {})
@@ -296,7 +296,7 @@ class TestPipelineSentinel:
             name="p.sentinel",
             steps={
                 "work": ForEach(
-                    workflow="test.worker",
+                    task="test.worker",
                     over=lambda sk, kw: [{"i": j} for j in range(3)],
                 ),
             },
@@ -312,7 +312,7 @@ class TestPipelineSentinel:
         _register_noop("test.single")
         p = Pipeline(
             name="p.no_sentinel",
-            steps={"only": Step(workflow="test.single")},
+            steps={"only": Step(task="test.single")},
         )
         plan = p.build_plan("tag:1", {})
 
