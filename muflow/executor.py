@@ -125,7 +125,7 @@ def execute_task(
     Returns
     -------
     ExecutionResult
-        Success status, any error information, and list of files written.
+        Success/failure status and any error information.
     """
     from muflow.registry import TaskEntry
 
